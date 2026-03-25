@@ -169,13 +169,14 @@ function getFiltered(){
 }
 
 function render(){
-  const ec=D.filter(x=>x.isEvent).length,uc=D.filter(x=>!x.isEvent).length;
+  const q=document.getElementById('q').value.toLowerCase();
+  const qFilter=x=>!q||(x.title.toLowerCase().includes(q)||x.brand.toLowerCase().includes(q)||x.tags.some(t=>t.toLowerCase().includes(q)));
+  const ec=D.filter(x=>x.isEvent).filter(qFilter).length,uc=D.filter(x=>!x.isEvent).filter(qFilter).length;
   document.getElementById('tabBar').innerHTML=MAIN_TABS.map(t=>{
     const c=t==="마케팅 이벤트"?ec:uc;
     return`<button class="tab-btn${mainTab===t?' on':''}" onclick="mainTab='${t}';sector='전체';render()">${t}<span class="cnt">${c}</span></button>`;
   }).join('');
-  const q=document.getElementById('q').value.toLowerCase();
-  const base=(mainTab==="마케팅 이벤트"?D.filter(x=>x.isEvent):D.filter(x=>!x.isEvent)).filter(x=>!q||(x.title.toLowerCase().includes(q)||x.brand.toLowerCase().includes(q)||x.tags.some(t=>t.toLowerCase().includes(q))));
+  const base=(mainTab==="마케팅 이벤트"?D.filter(x=>x.isEvent):D.filter(x=>!x.isEvent)).filter(qFilter);
   document.getElementById('chips').innerHTML=SECTORS.map(s=>{
     const c=s==="전체"?base.length:base.filter(x=>x.sector===s).length;
     if(c===0&&s!=="전체")return'';
