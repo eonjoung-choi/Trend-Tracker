@@ -142,7 +142,8 @@ let mainTab="서비스 업데이트",sector="전체";
   try{
     const res=await fetch('news_data.json?t='+Date.now());
     if(!res.ok) throw new Error('fetch failed: '+res.status);
-    D=await res.json();
+    const json=await res.json();
+    D=Array.isArray(json)?json:(json.items||[]);
   }catch(e){
     console.warn('news_data.json 로드 실패, 로컬 fallback 확인:',e.message);
     /* file:// 프로토콜 등에서 fetch 실패 시 빈 상태 유지 */
