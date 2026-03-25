@@ -186,7 +186,7 @@ function render(){
   else{list.forEach(x=>{
     const g=dateGroup(x.date);
     if(g!==lg){html+=`<div class="date-label">${g}</div>`;lg=g;}
-    html+=`<div class="card" onclick="open_sheet(${x.id})"><div class="card-top"><span class="brand ${x.bc}">${x.brand}</span><span class="type ${x.tc}">${x.type}</span>${x.il==='높음'?'<span class="impact imp-h">영향↑</span>':''}</div><div class="card-title">${x.title}</div><div class="card-desc">${x.desc}</div><div class="card-foot"><div class="tags">${x.tags.slice(0,3).map(t=>`<span class="tag">#${t}</span>`).join('')}</div><span class="card-date">${fmtRelative(x.date)}</span></div></div>`;
+    html+=`<div class="card" onclick="open_sheet(${x.id})"><div class="card-top"><span class="brand ${x.bc}">${x.brand}</span><span class="type ${x.tc}">${x.type}</span></div><div class="card-title">${x.title}</div><div class="card-desc">${x.desc}</div><div class="card-foot"><div class="tags">${x.tags.slice(0,3).map(t=>`<span class="tag">#${t}</span>`).join('')}</div><span class="card-date">${fmtRelative(x.date)}</span></div></div>`;
   });}
   document.getElementById('feed').innerHTML=html;
 }
