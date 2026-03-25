@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Trend Tracker 금융, 커머스</title>
+<link href="https://cdnjs.cloudflare.com/ajax/libs/pretendard/1.3.9/variable/pretendardvariable.min.css" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#F5F6F8;--surface:#FFF;--border:#ECEEF1;
+  --t1:#191F28;--t2:#4E5968;--t3:#8B95A1;
+  --accent:#3182F6;--accent-bg:#EBF3FE;
+  --red:#F04452;--red-bg:#FFF0F1;
+  --green:#00B386;--green-bg:#E8FAF5;
+  --orange:#FF6B2C;--orange-bg:#FFF3ED;
+  --purple:#8B5CF6;--purple-bg:#F3F0FF;
+  --amber:#B45309;--amber-bg:#FFFBEB;
+  --r:12px;
+}
+body{font-family:'Pretendard Variable',-apple-system,system-ui,sans-serif;background:var(--bg);color:var(--t1);line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden;-webkit-text-size-adjust:100%;overscroll-behavior-y:contain}
+
+/* ── HEADER ── */
+.hd{background:var(--surface);position:sticky;top:0;z-index:50;border-bottom:1px solid var(--border)}
+.hd-top{display:flex;align-items:center;justify-content:space-between;padding:18px 16px 6px}
+.hd-left{display:flex;align-items:baseline;gap:10px;min-width:0}
+.logo{font-size:26px;font-weight:900;letter-spacing:-1px;color:var(--t1);white-space:nowrap}
+.logo sub{font-size:11px;font-weight:500;color:var(--t3);vertical-align:baseline;margin-left:4px;letter-spacing:0}
+.hd-date{font-size:13px;font-weight:600;color:var(--accent);white-space:nowrap}
+.hd-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.search-btn{width:40px;height:40px;border-radius:50%;border:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--t2);transition:.15s;-webkit-tap-highlight-color:transparent}
+.search-btn:active{background:var(--bg)}
+.search-bar{overflow:hidden;max-height:0;transition:max-height .25s ease,margin .25s ease,opacity .25s ease;opacity:0;margin-top:0;position:relative;padding:0 16px}
+.search-bar.open{max-height:56px;opacity:1;margin-top:10px}
+.search-bar input{width:100%;padding:10px 38px 10px 38px;border:1px solid var(--border);border-radius:10px;font-size:16px;font-family:inherit;background:var(--bg);color:var(--t1);outline:none;transition:.2s}
+.search-bar input:focus{border-color:var(--accent);background:#fff;box-shadow:0 0 0 3px var(--accent-bg)}
+.search-bar input::placeholder{color:var(--t3)}
+.search-bar svg.search-icon{position:absolute;left:28px;top:50%;transform:translateY(-50%);color:var(--t3)}
+.search-clear{position:absolute;right:28px;top:50%;transform:translateY(-50%);width:20px;height:20px;border:none;background:var(--t3);color:#fff;border-radius:50%;font-size:12px;line-height:20px;text-align:center;cursor:pointer;display:none;padding:0;font-family:inherit;-webkit-tap-highlight-color:transparent}
+.search-clear.show{display:flex;align-items:center;justify-content:center}
+
+/* ── TABS (헤더 내부) ── */
+.tab-bar{display:flex;gap:0;overflow-x:auto;padding:0 16px;border-bottom:1px solid var(--border);-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.tab-bar::-webkit-scrollbar{display:none}
+.tab-btn{white-space:nowrap;padding:12px 16px;font-size:14px;font-weight:500;color:var(--t3);cursor:pointer;border:none;background:none;border-bottom:2px solid transparent;font-family:inherit;transition:.15s;flex-shrink:0;min-height:48px}
+.tab-btn.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:700}
+.tab-btn .cnt{font-size:11px;font-weight:600;margin-left:4px;padding:1px 6px;border-radius:100px;background:var(--bg);color:var(--t3)}
+.tab-btn.on .cnt{background:var(--accent-bg);color:var(--accent)}
+
+/* ── CHIPS (헤더 내부) ── */
+.chips{display:flex;gap:8px;overflow-x:auto;padding:12px 16px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{white-space:nowrap;padding:9px 18px;border-radius:100px;font-size:13px;font-weight:500;border:1px solid var(--border);background:var(--surface);color:var(--t2);cursor:pointer;transition:.15s;flex-shrink:0;min-height:40px}
+.chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+/* ── FEED ── */
+.feed{padding:8px 12px 100px}
+.date-label{font-size:12px;font-weight:600;color:var(--t3);padding:20px 4px 10px;position:sticky;top:148px;background:var(--bg);z-index:10}
+.card{background:var(--surface);border-radius:var(--r);padding:20px 18px;margin-bottom:12px;border:1px solid var(--border);cursor:pointer;transition:.15s;-webkit-tap-highlight-color:transparent}
+.card:active{transform:scale(.985);background:#FAFBFC}
+.card-top{display:flex;align-items:center;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+.brand{display:inline-flex;align-items:center;padding:5px 12px;border-radius:100px;font-size:11px;font-weight:700;white-space:nowrap}
+.type{display:inline-flex;padding:5px 12px;border-radius:100px;font-size:11px;font-weight:500;white-space:nowrap}
+.t-new{background:var(--accent-bg);color:var(--accent)}.t-update{background:var(--green-bg);color:var(--green)}.t-event{background:var(--orange-bg);color:var(--orange)}.t-policy{background:var(--purple-bg);color:var(--purple)}.t-ux{background:var(--amber-bg);color:var(--amber)}
+.card-title{font-size:15px;font-weight:600;line-height:1.5;color:var(--t1);margin-bottom:6px}
+.card-desc{font-size:13px;color:var(--t2);line-height:1.55;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.card-foot{display:flex;align-items:center;justify-content:space-between;margin-top:14px}
+.tags{display:flex;gap:5px;flex-wrap:nowrap;min-width:0;overflow:hidden}
+.tag{font-size:11px;padding:4px 10px;background:var(--bg);color:var(--t3);border-radius:100px;white-space:nowrap}
+.card-date{font-size:12px;color:var(--t3);white-space:nowrap;flex-shrink:0;margin-left:8px}
+.impact{font-size:10px;padding:4px 10px;border-radius:100px;font-weight:600;white-space:nowrap}
+.imp-h{background:var(--red-bg);color:var(--red)}
+
+/* ── SHEET ── */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:100;opacity:0;pointer-events:none;transition:opacity .2s}
+.overlay.on{opacity:1;pointer-events:auto}
+.sheet{position:fixed;bottom:0;left:0;right:0;z-index:101;background:var(--surface);border-radius:20px 20px 0 0;max-height:92vh;overflow-y:auto;transform:translateY(100%);transition:transform .3s cubic-bezier(.32,.72,0,1);-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding-bottom:env(safe-area-inset-bottom,0)}
+.sheet.on{transform:translateY(0)}
+.sheet-handle{width:36px;height:4px;background:var(--border);border-radius:2px;margin:10px auto 0}
+.sheet-head{padding:14px 16px 10px;display:flex;align-items:flex-start;gap:10px}
+.sheet-head-info{flex:1;min-width:0}
+.sheet-close{width:36px;height:36px;border-radius:50%;background:var(--bg);border:none;font-size:18px;color:var(--t3);cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}
+.sheet-body{padding:0 16px 32px}
+.sh-section{margin-bottom:20px}
+.sh-label{font-size:13px;font-weight:700;color:var(--t1);margin-bottom:8px;display:flex;align-items:center;gap:6px}
+.sh-label-icon{font-size:14px}
+.sh-text{font-size:14px;color:var(--t1);line-height:1.75}
+.sh-tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.sh-tag{font-size:12px;padding:7px 16px;background:var(--accent-bg);color:var(--accent);border-radius:100px;font-weight:600;white-space:nowrap;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:.15s;border:none;font-family:inherit}
+.sh-tag:active{background:#D0E3FC}
+.sh-meta{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:14px;background:var(--bg);border-radius:var(--r);margin-bottom:20px}
+.sh-meta-item{display:flex;flex-direction:column;gap:2px}
+.sh-meta-item small{font-size:11px;color:var(--t3)}
+.sh-meta-item strong{font-size:13px;font-weight:600}
+.sh-sources{display:flex;flex-direction:column;gap:8px;margin-top:6px}
+.src-btn{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--bg);border:1px solid var(--border);border-radius:10px;text-decoration:none;color:var(--t1);font-size:14px;font-weight:500;transition:.15s;-webkit-tap-highlight-color:transparent;min-height:48px}
+.src-btn:active{background:var(--border)}
+.src-btn-left{display:flex;align-items:center;gap:8px}
+.src-type-badge{font-size:11px;padding:3px 10px;border-radius:100px;background:var(--accent-bg);color:var(--accent);font-weight:600}
+.src-arrow{color:var(--t3);font-size:16px;flex-shrink:0}
+.b-kakao{background:#FEE500;color:#191919}.b-toss{background:#0064FF;color:#fff}.b-naver{background:#03C75A;color:#fff}.b-coupang{background:#E31837;color:#fff}.b-shinhan{background:#0046FF;color:#fff}.b-kb{background:#FFBC00;color:#191919}.b-samsung{background:#1428A0;color:#fff}.b-hyundai{background:#1A1A1A;color:#fff}.b-woori{background:#0066B3;color:#fff}.b-baemin{background:#2AC1BC;color:#fff}.b-kurly{background:#5F0080;color:#fff}.b-musinsa{background:#111;color:#fff}.b-carrot{background:#FF6F0F;color:#fff}.b-zigzag{background:#FF2D78;color:#fff}.b-ssg{background:#FF5452;color:#fff}.b-lotte{background:#E60012;color:#fff}
+.empty{text-align:center;padding:60px 20px;color:var(--t3)}.empty p{font-size:14px;margin-top:8px}
+@supports(padding-bottom:env(safe-area-inset-bottom)){.feed{padding-bottom:calc(100px + env(safe-area-inset-bottom))}}
+</style>
+</head>
+<body>
+
+<header class="hd">
+  <div class="hd-top">
+    <div class="hd-left">
+      <div class="logo" onclick="goHome()" style="cursor:pointer">Trend Tracker<sub>(금융, 커머스)</sub></div>
+      <div class="hd-date" id="dateLabel"></div>
+    </div>
+    <div class="hd-right">
+      <button class="search-btn" onclick="toggleSearch()" aria-label="검색">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="search-bar" id="searchBar">
+    <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+    <input id="q" type="text" placeholder="브랜드, 키워드 검색..." oninput="onSearchInput()">
+    <button class="search-clear" id="searchClear" onclick="clearSearch()" aria-label="검색어 삭제">✕</button>
+  </div>
+  <div class="tab-bar" id="tabBar"></div>
+  <div class="chips" id="chips"></div>
+</header>
+
+<div class="feed" id="feed"></div>
+<div class="overlay" id="ov" onclick="close_sheet()"></div>
+<div class="sheet" id="sh"><div class="sheet-handle"></div><div id="shContent"></div></div>
+
+<script>
+let D=[];
+
+const MAIN_TABS=["서비스 업데이트","마케팅 이벤트"];
+const SECTORS=["전체","핀테크","전통금융","이커머스","버티컬커머스"];
+let mainTab="서비스 업데이트",sector="전체";
+
+/* ── 데이터 로드: news_data.json에서 fetch ── */
+(async function loadData(){
+  try{
+    const res=await fetch('news_data.json?t='+Date.now());
+    if(!res.ok) throw new Error('fetch failed: '+res.status);
+    D=await res.json();
+  }catch(e){
+    console.warn('news_data.json 로드 실패, 로컬 fallback 확인:',e.message);
+    /* file:// 프로토콜 등에서 fetch 실패 시 빈 상태 유지 */
+    document.getElementById('feed').innerHTML='<div class="empty"><p>뉴스 데이터를 불러올 수 없습니다.<br>GitHub Pages 배포 후 정상 작동합니다.</p></div>';
+  }
+  initApp();
+})();
+
+function fmtDateFull(ds){const d=new Date(ds);return`${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`}
+function fmtRelative(ds){const d=new Date(ds),now=new Date(),diff=Math.floor((now-d)/864e5);if(diff===0)return"오늘";if(diff===1)return"어제";if(diff<7)return diff+"일 전";return`${d.getMonth()+1}월 ${d.getDate()}일`}
+function dateGroup(ds){const d=new Date(ds),now=new Date(),diff=Math.floor((now-d)/864e5);if(diff===0)return"오늘";if(diff===1)return"어제";if(diff<7)return"이번 주";if(diff<14)return"지난 주";return`${d.getMonth()+1}월`}
+
+function getFiltered(){
+  let list=D.filter(x=>{
+    const q=document.getElementById('q').value.toLowerCase();
+    if(mainTab==="마케팅 이벤트"&&!x.isEvent)return false;
+    if(mainTab==="서비스 업데이트"&&x.isEvent)return false;
+    if(sector!=="전체"&&x.sector!==sector)return false;
+    if(q&&!(x.title.toLowerCase().includes(q)||x.brand.toLowerCase().includes(q)||x.tags.some(t=>t.toLowerCase().includes(q))))return false;
+    return true;
+  });
+  list.sort((a,b)=>new Date(b.date)-new Date(a.date));
+  return list;
+}
+
+function render(){
+  const ec=D.filter(x=>x.isEvent).length,uc=D.filter(x=>!x.isEvent).length;
+  document.getElementById('tabBar').innerHTML=MAIN_TABS.map(t=>{
+    const c=t==="마케팅 이벤트"?ec:uc;
+    return`<button class="tab-btn${mainTab===t?' on':''}" onclick="mainTab='${t}';sector='전체';render()">${t}<span class="cnt">${c}</span></button>`;
+  }).join('');
+  const base=mainTab==="마케팅 이벤트"?D.filter(x=>x.isEvent):D.filter(x=>!x.isEvent);
+  document.getElementById('chips').innerHTML=SECTORS.map(s=>{
+    const c=s==="전체"?base.length:base.filter(x=>x.sector===s).length;
+    if(c===0&&s!=="전체")return'';
+    return`<div class="chip${sector===s?' on':''}" onclick="sector='${s}';render()">${s} ${c}</div>`;
+  }).join('');
+  const list=getFiltered();
+  let html='',lg='';
+  if(!list.length){html='<div class="empty"><p>조건에 맞는 항목이 없습니다</p></div>';}
+  else{list.forEach(x=>{
+    const g=dateGroup(x.date);
+    if(g!==lg){html+=`<div class="date-label">${g}</div>`;lg=g;}
+    html+=`<div class="card" onclick="open_sheet(${x.id})"><div class="card-top"><span class="brand ${x.bc}">${x.brand}</span><span class="type ${x.tc}">${x.type}</span>${x.il==='높음'?'<span class="impact imp-h">영향↑</span>':''}</div><div class="card-title">${x.title}</div><div class="card-desc">${x.desc}</div><div class="card-foot"><div class="tags">${x.tags.slice(0,3).map(t=>`<span class="tag">#${t}</span>`).join('')}</div><span class="card-date">${fmtRelative(x.date)}</span></div></div>`;
+  });}
+  document.getElementById('feed').innerHTML=html;
+}
+
+function open_sheet(id){
+  const x=D.find(d=>d.id===id);if(!x)return;
+  const stars='★'.repeat(x.imp)+'☆'.repeat(5-x.imp);
+  document.getElementById('shContent').innerHTML=`
+    <div class="sheet-head"><div class="sheet-head-info"><div class="card-top" style="margin-bottom:10px"><span class="brand ${x.bc}">${x.brand}</span><span class="type ${x.tc}">${x.type}</span></div><div style="font-size:17px;font-weight:700;line-height:1.4">${x.title}</div></div><button class="sheet-close" onclick="close_sheet()">✕</button></div>
+    <div class="sheet-body">
+      <div class="sh-meta">
+        <div class="sh-meta-item"><small>업권</small><strong>${x.sector}</strong></div>
+        <div class="sh-meta-item"><small>발표일</small><strong>${fmtDateFull(x.date)}</strong></div>
+        <div class="sh-meta-item"><small>중요도</small><strong>${stars}</strong></div>
+        <div class="sh-meta-item"><small>사용자 영향도</small><strong>${x.il}</strong></div>
+      </div>
+      <div class="sh-section"><div class="sh-label"><span class="sh-label-icon">📌</span> 무엇이 달라졌나요?</div><div class="sh-text">${x.detail}</div></div>
+      <div class="sh-section"><div class="sh-label"><span class="sh-label-icon">👤</span> 사용자에게 어떤 영향이 있나요?</div><div class="sh-text">${x.impact_text}</div></div>
+      <div class="sh-section"><div class="sh-label"><span class="sh-label-icon">💡</span> 실무에서 참고할 포인트</div><div class="sh-text">${x.why}</div></div>
+      <div class="sh-section"><div class="sh-label"><span class="sh-label-icon">🏷️</span> 태그</div><div class="sh-tags">${x.tags.map(t=>`<button class="sh-tag" onclick="filterByTag('${t}')">#${t}</button>`).join('')}</div></div>
+      <div class="sh-section"><div class="sh-label"><span class="sh-label-icon">🔗</span> 출처 바로가기</div><div class="sh-sources">${x.src.map(s=>`<a href="${s.url}" target="_blank" rel="noopener" class="src-btn"><div class="src-btn-left"><span class="src-type-badge">${s.ty}</span><span>${s.t}</span></div><span class="src-arrow">→</span></a>`).join('')}</div></div>
+    </div>`;
+  document.getElementById('ov').classList.add('on');
+  document.getElementById('sh').classList.add('on');
+  document.body.style.overflow='hidden';
+}
+
+function close_sheet(){document.getElementById('ov').classList.remove('on');document.getElementById('sh').classList.remove('on');document.body.style.overflow='';}
+function goHome(){mainTab='서비스 업데이트';sector='전체';document.getElementById('q').value='';document.getElementById('searchClear').classList.remove('show');const sb=document.getElementById('searchBar');if(sb.classList.contains('open'))sb.classList.remove('open');render();window.scrollTo({top:0,behavior:'smooth'});}
+function onSearchInput(){const v=document.getElementById('q').value;document.getElementById('searchClear').classList.toggle('show',v.length>0);render();}
+function clearSearch(){document.getElementById('q').value='';document.getElementById('searchClear').classList.remove('show');document.getElementById('q').focus();render();}
+function toggleSearch(){const b=document.getElementById('searchBar');b.classList.toggle('open');if(b.classList.contains('open'))document.getElementById('q').focus();else{document.getElementById('q').value='';document.getElementById('searchClear').classList.remove('show');render();}}
+function filterByTag(tag){close_sheet();mainTab=D.some(x=>x.isEvent&&x.tags.includes(tag))?mainTab:mainTab;sector='전체';document.getElementById('q').value=tag;document.getElementById('searchClear').classList.add('show');const sb=document.getElementById('searchBar');if(!sb.classList.contains('open'))sb.classList.add('open');render();window.scrollTo({top:0,behavior:'smooth'});}
+
+function initApp(){
+  const now=new Date();
+  document.getElementById('dateLabel').textContent=now.toLocaleDateString('ko-KR',{month:'long',day:'numeric',weekday:'short'})+' · '+D.length+'건';
+  render();
+}
+
+let touchY=0;
+document.getElementById('sh').addEventListener('touchstart',e=>{touchY=e.touches[0].clientY},{passive:true});
+document.getElementById('sh').addEventListener('touchmove',e=>{if(e.touches[0].clientY-touchY>80&&document.getElementById('sh').scrollTop<=0)close_sheet();},{passive:true});
+</script>
+</body>
+</html>
