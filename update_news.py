@@ -257,17 +257,26 @@ def build_news_item(article: dict, enrichment: dict) -> dict:
 
 
 def load_existing() -> list:
-    """기존 news_data.json 로드"""
+    """기존 news_data.json 로드 (배열 또는 {items:[]} 구조 모두 지원)"""
     if NEWS_DATA_PATH.exists():
         with open(NEWS_DATA_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            if isinstance(data, list):
+                return data
+            if isinstance(data, dict) and "items" in data:
+                return data["items"]
     return []
 
 
 def save_data(items: list):
-    """news_data.json 저장"""
+    """news_data.json 저장 ({items:[]} 구조)"""
+    output = {
+        "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "count": len(items),
+        "items": items,
+    }
     with open(NEWS_DATA_PATH, "w", encoding="utf-8") as f:
-        json.dump(items, f, ensure_ascii=False, indent=2)
+        json.dump(output, f, ensure_ascii=False, indent=2)
 
 
 def main():
