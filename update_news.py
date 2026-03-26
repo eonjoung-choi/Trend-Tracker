@@ -87,10 +87,17 @@ BRAND_MAP = {
     "지그재그": ("지그재그", "b-zigzag"),
     "에이블리": ("에이블리", "b-ably"),
     "다이소몰": ("다이소", "b-daiso"),
+    "G마켓": ("G마켓", "b-gmarket"),
+    "지마켓": ("G마켓", "b-gmarket"),
+    "옥션": ("G마켓", "b-gmarket"),
+    "11번가": ("11번가", "b-11st"),
     "신한카드": ("신한카드", "b-shinhan"),
     "KB국민카드": ("KB국민", "b-kb"),
+    "KB카드": ("KB국민", "b-kb"),
     "삼성카드": ("삼성카드", "b-samsung"),
     "현대카드": ("현대카드", "b-hyundai"),
+    "우리카드": ("우리카드", "b-woori"),
+    "하나카드": ("하나카드", "b-hana"),
 }
 
 # ── 업권 매핑 ──
@@ -105,22 +112,32 @@ SECTOR_KEYWORDS = {
 EXCLUDE_KEYWORDS = [
     # 교육/채용/IR
     "교육", "수강", "강의", "채용", "인턴", "공모전", "세미나", "컨퍼런스",
+    "부트캠프", "워크숍", "아카데미",
     "실적 발표", "주가", "시가총액", "배당", "공시", "IR",
-    # 비관련 산업/기업
-    "삼성전자", "삼성 쇼핑", "삼성 TV", "반도체", "갤럭시", "자동차", "부동산", "아파트",
-    "삼성바이오", "삼성SDI", "삼성SDS", "삼성물산", "삼성생명", "삼성중공업",
+    # 비관련 산업/기업 (삼성 계열)
+    "삼성전자", "삼성 쇼핑", "삼성 TV", "삼성디스플레이", "삼성 갤럭시",
+    "반도체", "갤럭시", "삼성바이오", "삼성SDI", "삼성SDS", "삼성물산", "삼성생명", "삼성중공업",
+    # 비관련 산업/기업 (현대 계열)
     "현대자동차", "현대건설", "현대중공업", "현대모비스", "현대백화점",
-    "LG전자", "LG화학", "LG에너지", "SK하이닉스",
-    "아마존", "Amazon", "테슬라", "애플 TV", "넷플릭스",
+    # 비관련 산업/기업 (기타 대기업)
+    "LG전자", "LG화학", "LG에너지", "LG생활건강", "SK하이닉스",
+    "코스맥스", "에이피알", "신세계인터내셔날", "코오롱FnC", "코오롱인더",
+    "시몬스", "락앤락", "한샘", "이랜드",
+    # 비관련 해외 기업
+    "아마존", "Amazon", "테슬라", "애플 TV", "넷플릭스", "메타 중소기업", "Meta ",
     # 단순 할인/쿠폰/프로모션
     "최대 할인", "쿠폰 지급", "적립금 이벤트", "할인코드", "쿠폰 총정리",
     "할인 쿠폰 코드", "프로모션 코드", "캐시백 이벤트", "웰컴백 쿠폰",
     "1등찍기", "1등 찍기", "두근두근", "정답 공개", "퀴즈 정답",
     # 단순 쇼핑 가이드
     "인기 상품", "추천 상품", "쇼핑 리스트", "구매 가이드",
+    # 뉴스 브리프/라운드업 (여러 기업 나열형)
+    "[브리프]", "[N2 ", "N2 유통", "유통 브리프",
+    # 광고제/어워드 (수상 소식은 마케팅 이벤트 아님)
+    "광고제", "어워드 수상", "칸 라이언즈",
     # 기타 비관련
     "주식", "증시", "코스피", "코스닥", "ETF",
-    "알리익스프레스", "테무", "쉬인",
+    "알리익스프레스", "테무", "쉬인", "자동차", "부동산", "아파트",
 ]
 
 # ── RSS 피드 목록 ──
@@ -143,6 +160,19 @@ def generate_id(title: str) -> int:
 def detect_brand(title: str, desc: str) -> tuple:
     """기사 내용에서 브랜드 감지 (정밀 매칭). 매칭 실패 시 None 반환"""
     text = title + " " + desc
+
+    # 삼성전자 오인 방지: 삼성전자/갤럭시/반도체 관련이면 삼성카드로 잡지 않음
+    samsung_false = ["삼성전자", "갤럭시", "반도체", "삼성디스플레이", "삼성 TV", "삼성 쇼핑", "삼성SDI", "삼성SDS"]
+    if any(sf in text for sf in samsung_false):
+        if "삼성카드" not in text:  # 진짜 삼성카드 기사가 아니면 제외
+            return None, None
+
+    # 현대차/현대건설 오인 방지
+    hyundai_false = ["현대자동차", "현대건설", "현대중공업", "현대모비스", "현대백화점"]
+    if any(hf in text for hf in hyundai_false):
+        if "현대카드" not in text:
+            return None, None
+
     for keyword, (brand, bc) in BRAND_MAP.items():
         if keyword in text:
             return brand, bc
@@ -484,14 +514,27 @@ def main():
     naver_articles = fetch_naver_news()
     print(f"  🔍 네이버 검색: {len(naver_articles)}건 (노이즈 제거 후)")
 
-    # 4. 합산 후 중복 제거
+    # 4. 합산 후 중복 제거 (제목 유사도 기반)
     all_raw = rss_articles + naver_articles
-    seen = set()
     raw_articles = []
     for a in all_raw:
-        short = a["title"][:30]
-        if short not in seen:
-            seen.add(short)
+        title_clean = re.sub(r"[^가-힣a-zA-Z0-9]", "", a["title"])
+        is_dup = False
+        for existing_a in raw_articles:
+            existing_clean = re.sub(r"[^가-힣a-zA-Z0-9]", "", existing_a["title"])
+            # 제목 앞 20자 또는 핵심 키워드 3개 이상 겹치면 중복
+            if title_clean[:20] == existing_clean[:20]:
+                is_dup = True
+                break
+            # 단어 집합 유사도 체크
+            words_a = set(title_clean[i:i+2] for i in range(len(title_clean)-1))
+            words_b = set(existing_clean[i:i+2] for i in range(len(existing_clean)-1))
+            if words_a and words_b:
+                overlap = len(words_a & words_b) / min(len(words_a), len(words_b))
+                if overlap > 0.6:
+                    is_dup = True
+                    break
+        if not is_dup:
             raw_articles.append(a)
 
     # 5. 기존 뉴스와 중복 제거
