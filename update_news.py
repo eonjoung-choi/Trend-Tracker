@@ -47,13 +47,15 @@ NAVER_SEARCH_QUERIES = [
     {"q": "쿠팡 서비스 변경", "type": "service"},
     {"q": "배달의민족 업데이트", "type": "service"},
     {"q": "간편결제 출시", "type": "service"},
-    # 마케팅 이벤트 (구체적 브랜드 + 마케팅 행위)
-    {"q": "무신사 콜라보 캠페인", "type": "marketing"},
-    {"q": "올리브영 팝업스토어", "type": "marketing"},
-    {"q": "컬리 브랜드 마케팅", "type": "marketing"},
-    {"q": "쿠팡 마케팅 전략", "type": "marketing"},
-    {"q": "이커머스 팝업스토어 콜라보", "type": "marketing"},
-    {"q": "배달앱 프로모션 캠페인", "type": "marketing"},
+    # 마케팅 이벤트 (전략적 캠페인·콜라보·글로벌 진출)
+    {"q": "무신사 팝업스토어 글로벌", "type": "marketing"},
+    {"q": "무신사 콜라보 브랜드 제휴", "type": "marketing"},
+    {"q": "올리브영 신규 사업 플랫폼", "type": "marketing"},
+    {"q": "올리브영 팝업스토어 체험", "type": "marketing"},
+    {"q": "컬리 페스타 캠페인 전략", "type": "marketing"},
+    {"q": "당근 광고 로컬 마케팅", "type": "marketing"},
+    {"q": "현대카드 문화 마케팅 슈퍼콘서트", "type": "marketing"},
+    {"q": "이커머스 브랜드 콜라보 캠페인", "type": "marketing"},
 ]
 
 # ── 브랜드 매핑 (정밀화: 모호한 단일 키워드 제거) ──
@@ -68,7 +70,9 @@ BRAND_MAP = {
     "토스증권": ("토스", "b-toss"),
     "쿠팡이츠": ("쿠팡", "b-coupang"),
     "쿠팡페이": ("쿠팡", "b-coupang"),
+    "쿠팡 로켓": ("쿠팡", "b-coupang"),
     "로켓배송": ("쿠팡", "b-coupang"),
+    "쿠팡 와우": ("쿠팡", "b-coupang"),
     "배달의민족": ("배달의민족", "b-baemin"),
     "배민": ("배달의민족", "b-baemin"),
     "무신사": ("무신사", "b-musinsa"),
@@ -91,8 +95,8 @@ BRAND_MAP = {
 
 # ── 업권 매핑 ──
 SECTOR_KEYWORDS = {
-    "핀테크": ["간편결제", "핀테크", "페이", "결제", "금융", "대출", "은행", "인증", "생체"],
-    "전통금융": ["신한카드", "KB국민", "삼성카드", "현대카드", "우리은행", "하나은행", "농협"],
+    "핀테크": ["간편결제", "핀테크", "페이", "결제", "금융", "대출", "인증", "생체", "토스뱅크", "토스페이", "토스증권", "카카오뱅크", "케이뱅크"],
+    "전통금융": ["신한카드", "KB국민카드", "삼성카드", "현대카드", "우리은행", "하나은행", "농협"],
     "이커머스": ["쿠팡", "SSG", "롯데온", "11번가", "G마켓", "이커머스", "온라인쇼핑"],
     "버티컬커머스": ["무신사", "올리브영", "컬리", "배달", "당근", "지그재그", "에이블리", "다이소"],
 }
@@ -102,13 +106,21 @@ EXCLUDE_KEYWORDS = [
     # 교육/채용/IR
     "교육", "수강", "강의", "채용", "인턴", "공모전", "세미나", "컨퍼런스",
     "실적 발표", "주가", "시가총액", "배당", "공시", "IR",
-    # 비관련 산업
-    "삼성전자", "반도체", "갤럭시", "자동차", "부동산", "아파트",
-    "삼성바이오", "삼성SDI", "삼성SDS", "삼성물산", "삼성생명",
-    "현대자동차", "현대건설", "현대중공업", "현대모비스",
+    # 비관련 산업/기업
+    "삼성전자", "삼성 쇼핑", "삼성 TV", "반도체", "갤럭시", "자동차", "부동산", "아파트",
+    "삼성바이오", "삼성SDI", "삼성SDS", "삼성물산", "삼성생명", "삼성중공업",
+    "현대자동차", "현대건설", "현대중공업", "현대모비스", "현대백화점",
     "LG전자", "LG화학", "LG에너지", "SK하이닉스",
-    # 단순 할인/쿠폰 나열
-    "최대 할인", "쿠폰 지급", "적립금 이벤트",
+    "아마존", "Amazon", "테슬라", "애플 TV", "넷플릭스",
+    # 단순 할인/쿠폰/프로모션
+    "최대 할인", "쿠폰 지급", "적립금 이벤트", "할인코드", "쿠폰 총정리",
+    "할인 쿠폰 코드", "프로모션 코드", "캐시백 이벤트", "웰컴백 쿠폰",
+    "1등찍기", "1등 찍기", "두근두근", "정답 공개", "퀴즈 정답",
+    # 단순 쇼핑 가이드
+    "인기 상품", "추천 상품", "쇼핑 리스트", "구매 가이드",
+    # 기타 비관련
+    "주식", "증시", "코스피", "코스닥", "ETF",
+    "알리익스프레스", "테무", "쉬인",
 ]
 
 # ── RSS 피드 목록 ──
@@ -129,12 +141,12 @@ def generate_id(title: str) -> int:
 
 
 def detect_brand(title: str, desc: str) -> tuple:
-    """기사 내용에서 브랜드 감지 (정밀 매칭)"""
+    """기사 내용에서 브랜드 감지 (정밀 매칭). 매칭 실패 시 None 반환"""
     text = title + " " + desc
     for keyword, (brand, bc) in BRAND_MAP.items():
         if keyword in text:
             return brand, bc
-    return "기타", "b-etc"
+    return None, None
 
 
 def detect_sector(title: str, desc: str) -> str:
@@ -272,6 +284,17 @@ def ai_validate_article(article: dict) -> bool:
     if not ANTHROPIC_API_KEY:
         return True  # API 없으면 전부 통과
 
+    is_mkt = article.get("_qtype") == "marketing"
+    mkt_criteria = ""
+    if is_mkt:
+        mkt_criteria = """
+[마케팅 이벤트 추가 기준] 아래를 모두 충족해야 "yes":
+- 단순 할인/세일/쿠폰이 아닌, 전략적 의미가 있는 캠페인이어야 함
+  (예: 글로벌 팝업스토어, 브랜드 콜라보, 새로운 사업 영역 진출, 문화 마케팅, 플랫폼 간 제휴)
+- 독특한 컨셉이나 PM/마케터에게 시사점을 줄 수 있는 내용이어야 함
+- "~% 할인", "~원 쿠폰", "적립금 이벤트" 같은 단순 프로모션은 반드시 "no"
+"""
+
     prompt = f"""다음 뉴스 기사가 아래 기준에 부합하는지 판단해주세요.
 
 제목: {article['title']}
@@ -282,13 +305,15 @@ def ai_validate_article(article: dict) -> bool:
 - 이커머스/배달 플랫폼(쿠팡, 네이버쇼핑, SSG, 배민 등)의 서비스 변경
 - 버티컬커머스(무신사, 올리브영, 컬리 등)의 전략적 마케팅 캠페인, 콜라보, 팝업스토어
 - PM/서비스 기획자에게 인사이트를 줄 수 있는 플랫폼 전략 뉴스
-
+{mkt_criteria}
 [제외 대상] 아래 중 하나라도 해당하면 "no":
-- 단순 할인/쿠폰 나열 (예: "최대 50% 할인", "적립금 이벤트")
+- 단순 할인/쿠폰/적립금/캐시백 나열 (예: "최대 50% 할인", "적립금 이벤트", "쿠폰 총정리")
 - 교육/채용/세미나/컨퍼런스 소식
-- 주가/실적/IR/투자 리포트
+- 주가/실적/IR/투자 리포트/배당
 - 금융사 이름만 들어갔지 실제 금융서비스와 무관한 기사 (예: 삼성전자를 삼성카드로 오인)
-- 특정 플랫폼의 개별 상품 리뷰나 추천
+- 특정 플랫폼의 개별 상품 리뷰나 추천 (예: "이 제품 써봤더니...")
+- 단순 이벤트 참여 방법/정답 안내 (예: "토스 1등찍기 정답")
+- 쇼핑 가이드/할인 코드 모음
 
 "yes" 또는 "no"만 답해주세요."""
 
@@ -473,10 +498,20 @@ def main():
     new_articles = [a for a in raw_articles if a["title"][:30] not in existing_titles]
     print(f"  🆕 신규 기사 후보: {len(new_articles)}건")
 
-    # 6. AI 관련성 검증 (Claude Haiku로 빠르게 필터링)
+    # 6. 브랜드 매칭 필터 (정의된 브랜드에 해당하지 않으면 제외)
+    branded = []
+    for a in new_articles:
+        brand, bc = detect_brand(a["title"], a["desc"])
+        if brand is not None:
+            branded.append(a)
+        else:
+            print(f"  🚫 브랜드 미매칭 제외: {a['title'][:40]}...")
+    print(f"  🏷️ 브랜드 매칭 통과: {len(branded)}건 (제외 {len(new_articles)-len(branded)}건)")
+
+    # 7. AI 관련성 검증 (Claude Haiku로 빠르게 필터링)
     validated = []
-    for i, article in enumerate(new_articles[:20]):  # 최대 20건 검증
-        print(f"  🔎 [{i+1}/{min(len(new_articles),20)}] 검증: {article['title'][:40]}...", end="")
+    for i, article in enumerate(branded[:20]):  # 최대 20건 검증
+        print(f"  🔎 [{i+1}/{min(len(branded),20)}] 검증: {article['title'][:40]}...", end="")
         if ai_validate_article(article):
             validated.append(article)
             print(" ✅")
@@ -484,7 +519,7 @@ def main():
             print(" ❌ 제외")
     print(f"  ✅ AI 검증 통과: {len(validated)}건")
 
-    # 7. 상세 분석 생성 (검증 통과한 기사만)
+    # 8. 상세 분석 생성 (검증 통과한 기사만)
     new_items = []
     for i, article in enumerate(validated[:10]):  # 최대 10건 분석
         is_event = article.get("_qtype") == "marketing"
@@ -493,18 +528,18 @@ def main():
         item = build_news_item(article, enrichment, is_event=is_event)
         new_items.append(item)
 
-    # 8. 병합 (신규 + 기존)
+    # 9. 병합 (신규 + 기존)
     all_items = new_items + existing
 
-    # 9. 오래된 뉴스 삭제
+    # 10. 오래된 뉴스 삭제
     cutoff = (datetime.now() - timedelta(days=DAYS_TO_KEEP)).strftime("%Y-%m-%d")
     all_items = [item for item in all_items if item["date"] >= cutoff]
 
-    # 10. 최대 개수 제한
+    # 11. 최대 개수 제한
     all_items.sort(key=lambda x: x["date"], reverse=True)
     all_items = all_items[:MAX_ITEMS]
 
-    # 11. 저장
+    # 12. 저장
     save_data(all_items)
     event_count = sum(1 for item in all_items if item.get("isEvent"))
     print(f"  ✅ 완료! 총 {len(all_items)}건 저장 (서비스 업데이트 {len(all_items)-event_count}건, 마케팅 이벤트 {event_count}건)")
