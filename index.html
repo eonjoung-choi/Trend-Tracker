@@ -153,8 +153,8 @@ let mainTab="서비스 업데이트",sector="전체";
 })();
 
 function fmtDateFull(ds){const d=new Date(ds);return`${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일`}
-function fmtRelative(ds){const d=new Date(ds),now=new Date(),diff=Math.floor((now-d)/864e5);if(diff===0)return"오늘";if(diff===1)return"어제";if(diff<7)return diff+"일 전";return`${d.getMonth()+1}월 ${d.getDate()}일`}
-function dateGroup(ds){const d=new Date(ds),now=new Date(),diff=Math.floor((now-d)/864e5);if(diff===0)return"오늘";if(diff===1)return"어제";if(diff<7)return"이번 주";if(diff<14)return"지난 주";return`${d.getMonth()+1}월`}
+function fmtRelative(ds){const d=new Date(ds+'T00:00:00+09:00'),now=new Date(),kst=new Date(now.toLocaleString('en-US',{timeZone:'Asia/Seoul'})),diff=Math.floor((new Date(kst.getFullYear(),kst.getMonth(),kst.getDate())-new Date(d.getFullYear(),d.getMonth(),d.getDate()))/864e5);if(diff===0)return"오늘";if(diff===1)return"어제";if(diff<7)return diff+"일 전";return`${d.getMonth()+1}월 ${d.getDate()}일`}
+function dateGroup(ds){const d=new Date(ds+'T00:00:00+09:00'),now=new Date(),kst=new Date(now.toLocaleString('en-US',{timeZone:'Asia/Seoul'})),diff=Math.floor((new Date(kst.getFullYear(),kst.getMonth(),kst.getDate())-new Date(d.getFullYear(),d.getMonth(),d.getDate()))/864e5);if(diff===0)return"오늘";if(diff===1)return"어제";if(diff<7)return"이번 주";if(diff<14)return"지난 주";return`${d.getMonth()+1}월`}
 
 function getFiltered(){
   let list=D.filter(x=>{
