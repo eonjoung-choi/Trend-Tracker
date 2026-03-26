@@ -210,7 +210,7 @@ function open_sheet(id){
       <div class="sh-section"><div class="sh-label"><span class="sh-label-icon">👤</span> 사용자에게 어떤 영향이 있나요?</div><div class="sh-text">${x.impact_text}</div></div>
       <div class="sh-section"><div class="sh-label"><span class="sh-label-icon">💡</span> 실무에서 참고할 포인트</div><div class="sh-text">${x.why}</div></div>
       <div class="sh-section"><div class="sh-label"><span class="sh-label-icon">🏷️</span> 태그</div><div class="sh-tags">${x.tags.map(t=>`<button class="sh-tag" onclick="filterByTag('${t}')">#${t}</button>`).join('')}</div></div>
-      <div class="sh-section"><div class="sh-label"><span class="sh-label-icon">🔗</span> 출처 바로가기</div><div class="sh-sources">${x.src.map(s=>`<a href="${s.url}" target="_blank" rel="noopener" class="src-btn"><div class="src-btn-left"><span class="src-type-badge">${s.ty}</span><span>${s.t}</span></div><span class="src-arrow">→</span></a>`).join('')}</div></div>
+      <div class="sh-section"><div class="sh-label"><span class="sh-label-icon">🔗</span> 출처 바로가기</div><div class="sh-sources">${(()=>{const s=x.src[0];return `<a href="${s.url}" target="_blank" rel="noopener" class="src-btn"><div class="src-btn-left"><span class="src-type-badge">${s.ty}</span><span>${s.t}</span></div><span class="src-arrow">→</span></a>`})()}</div></div>
     </div>`;
   document.getElementById('ov').classList.add('on');
   document.getElementById('sh').classList.add('on');
