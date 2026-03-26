@@ -2,8 +2,9 @@ name: 📰 뉴스 자동 업데이트
 
 on:
   schedule:
+    # 매일 오전 8시 KST (한국시간) = UTC 23:00 (전날)
     - cron: '0 23 * * *'
-  workflow_dispatch:
+  workflow_dispatch:  # 수동 실행 가능
 
 permissions:
   contents: write
@@ -21,11 +22,13 @@ jobs:
           python-version: '3.11'
 
       - name: 📦 의존성 설치
-        run: pip install -r requirements.txt
+        run: pip install feedparser requests
 
       - name: 🔄 뉴스 수집 및 업데이트
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
         run: python scripts/update_news.py
 
       - name: 📤 변경사항 커밋 & 푸시
