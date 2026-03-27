@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Trend Tracker 뉴스 자동 수집 스크립트 v3
+Trend Tracker 뉴스 자동 수집 스크립트 v4
 - 수동 큐레이션 기사 보호 (curated=true 플래그)
 - 네이버 뉴스 검색 API로 핀테크/이커머스 뉴스 수집
-- 5단계 필터링: 날짜→노이즈→브랜드→AI검증→분석
+- 6단계 필터링: 날짜→노이즈→브랜드(제목Only)→AI검증(브랜드명포함)→분석→최종검증
 - news_data.json 업데이트
 """
 
@@ -25,8 +25,8 @@ NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "")
 NEWS_DATA_PATH = Path(__file__).parent.parent / "news_data.json"
 MAX_ITEMS = 20  # 최대 보관 뉴스 수
 DAYS_TO_KEEP = 60  # 60일 이상 된 뉴스 삭제
-# 이번 달 기사만 수집 (2026-03 이후만 허용)
-MIN_DATE = (datetime.now().replace(day=1) - timedelta(days=5)).strftime("%Y-%m-%d")
+# ★ v4: 최근 14일 이내 기사만 수집 (과거 기사 유입 차단 강화)
+MIN_DATE = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
 
 # ── 타겟 키워드 (핀테크/이커머스 서비스 관련만) ──
 KEYWORDS = [
@@ -43,21 +43,28 @@ KEYWORDS = [
 ]
 
 # ── 네이버 뉴스 검색 쿼리 ──
-# 반드시 브랜드명을 포함하는 구체적 쿼리만 사용 (광범위 쿼리 금지)
+# ★ v4: 브랜드명 필수 + "출시/업데이트/개편" 등 서비스 변화 키워드 조합
+# 광범위 쿼리 제거, 각 쿼리에 expect_brand 지정 (결과 검증용)
 NAVER_SEARCH_QUERIES = [
-    # 서비스 업데이트 (브랜드 + 서비스 키워드 조합)
-    {"q": "네이버페이 신규 기능 출시", "type": "service"},
-    {"q": "카카오페이 서비스 업데이트", "type": "service"},
-    {"q": "토스 신기능 출시", "type": "service"},
-    {"q": "쿠팡 로켓배송 서비스", "type": "service"},
-    {"q": "배달의민족 서비스 변경", "type": "service"},
-    {"q": "신한카드 애플페이", "type": "service"},
-    # 마케팅 이벤트 (브랜드명 반드시 포함 + 구체적 캠페인 키워드)
-    {"q": "무신사 팝업스토어", "type": "marketing"},
-    {"q": "올리브영 팝업 신규 사업", "type": "marketing"},
-    {"q": "현대카드 슈퍼콘서트", "type": "marketing"},
-    {"q": "컬리 컬리페스타", "type": "marketing"},
-    {"q": "당근 광고 플랫폼", "type": "marketing"},
+    # 서비스 업데이트 — 브랜드+변화 키워드
+    {"q": "네이버페이 출시", "type": "service", "expect_brand": "네이버페이"},
+    {"q": "네이버페이 업데이트", "type": "service", "expect_brand": "네이버페이"},
+    {"q": "카카오페이 출시", "type": "service", "expect_brand": "카카오페이"},
+    {"q": "카카오페이 신기능", "type": "service", "expect_brand": "카카오페이"},
+    {"q": "토스 출시 서비스", "type": "service", "expect_brand": "토스"},
+    {"q": "토스뱅크 업데이트", "type": "service", "expect_brand": "토스"},
+    {"q": "쿠팡이츠 서비스", "type": "service", "expect_brand": "쿠팡"},
+    {"q": "쿠팡 로켓배송 개편", "type": "service", "expect_brand": "쿠팡"},
+    {"q": "배달의민족 서비스 개편", "type": "service", "expect_brand": "배달의민족"},
+    {"q": "배달의민족 신기능", "type": "service", "expect_brand": "배달의민족"},
+    {"q": "신한카드 서비스", "type": "service", "expect_brand": "신한카드"},
+    {"q": "삼성카드 결제 서비스", "type": "service", "expect_brand": "삼성카드"},
+    {"q": "현대카드 결제 서비스", "type": "service", "expect_brand": "현대카드"},
+    # 마케팅 이벤트 — 브랜드+캠페인 키워드
+    {"q": "무신사 팝업 콜라보", "type": "marketing", "expect_brand": "무신사"},
+    {"q": "올리브영 신규 서비스", "type": "marketing", "expect_brand": "올리브영"},
+    {"q": "컬리 서비스 전략", "type": "marketing", "expect_brand": "컬리"},
+    {"q": "당근마켓 광고 플랫폼", "type": "marketing", "expect_brand": "당근마켓"},
 ]
 
 # ── 브랜드 매핑 (정밀 키워드만, 모호한 단어 배제) ──
@@ -68,6 +75,7 @@ BRAND_MAP = {
     "네이버플러스 스토어": ("네이버페이", "b-naver"),
     "카카오페이": ("카카오페이", "b-kakao"),
     "카카오톡 선물": ("카카오페이", "b-kakao"),
+    "카카오툴즈": ("카카오페이", "b-kakao"),
     "토스뱅크": ("토스", "b-toss"),
     "토스페이": ("토스", "b-toss"),
     "토스증권": ("토스", "b-toss"),
@@ -104,14 +112,13 @@ BRAND_MAP = {
 
 # ── 브랜드 오인 방지 (false-positive 감지) ──
 BRAND_FALSE_POSITIVES = {
-    # "삼성" 키워드가 있을 때: 이것들이 함께 있으면 삼성카드가 아님
     "삼성카드": {
         "false_indicators": [
             "삼성전자", "갤럭시", "반도체", "삼성디스플레이", "삼성 TV",
             "삼성 쇼핑", "삼성SDI", "삼성SDS", "삼성물산", "삼성생명",
             "삼성중공업", "삼성바이오",
         ],
-        "true_indicator": "삼성카드",  # 이 키워드가 명시적으로 있어야만 삼성카드
+        "true_indicator": "삼성카드",
     },
     "현대카드": {
         "false_indicators": [
@@ -128,7 +135,7 @@ SSG_FALSE_KEYWORDS = [
     "이마트", "스타필드", "SSG 그룹", "신세계인터내셔날", "신세계프라퍼티",
 ]
 
-# ── "당근" 오매칭 방지 (일반 단어 "당근" vs "당근마켓/당근 서비스") ──
+# ── "당근" 오매칭 방지 ──
 DANGGEUN_TRUE_KEYWORDS = [
     "당근마켓", "당근 앱", "당근 광고", "당근 플랫폼", "당근 서비스",
     "당근 비즈", "당근페이", "당근 중고", "당근 동네",
@@ -144,7 +151,7 @@ SECTOR_KEYWORDS = {
 
 # ── 노이즈 제거: 제외 키워드 (대폭 확장) ──
 EXCLUDE_KEYWORDS = [
-    # === 정치/외교/시사 (마케팅과 무관) ===
+    # === 정치/외교/시사 ===
     "트럼프", "바이든", "관세", "무역전쟁", "무역 전쟁", "통상 압력",
     "대통령", "국회", "여당", "야당", "정치", "외교", "안보",
     "탄핵", "선거", "국방", "군사", "북한", "미사일",
@@ -178,7 +185,7 @@ EXCLUDE_KEYWORDS = [
     "메타 중소기업", "Meta ", "구글 클라우드", "마이크로소프트",
     "알리익스프레스", "테무", "쉬인", "틱톡 커머스",
 
-    # === 기업 일반/경영 기사 (서비스 업데이트 아님) ===
+    # === 기업 일반/경영 기사 ===
     "[기업家]", "[기업가]", "기업 분석", "경영 전략", "CEO 인터뷰",
     "수수료 논쟁", "수수료 갈등", "수수료 부담",
     "직매입", "월 1억 셀러",
@@ -200,6 +207,15 @@ EXCLUDE_KEYWORDS = [
     # === 뉴스 브리프/라운드업 (여러 기업 나열형) ===
     "[브리프]", "[N2 ", "N2 유통", "유통 브리프", "업계 동향",
     "[종합]", "[속보]", "外",
+    "업계", "일제히", "줄줄이", "경쟁사",
+
+    # === 수수료/규제/갈등 ===
+    "수수료율", "수수료 인상", "수수료 인하", "PG 수수료",
+    "공정거래", "독점", "불공정",
+
+    # === 과거 이벤트 리마인드/회고 ===
+    "돌아보", "회고", "1주년", "2주년", "3주년",
+    "지난해", "작년", "올해 상반기 결산",
 
     # === 광고제/어워드 ===
     "광고제", "어워드 수상", "칸 라이언즈", "대한민국 광고대상",
@@ -232,49 +248,41 @@ def generate_id(title: str) -> int:
 
 
 def detect_brand(title: str, desc: str) -> tuple:
-    """기사 내용에서 브랜드 감지 (정밀 매칭). 매칭 실패 시 None 반환.
+    """★ v4: 제목(title) 전용 브랜드 매칭. 본문(desc) 매칭 완전 제거.
 
-    핵심 로직: 제목(title)에서 먼저 매칭 시도 → 제목 매칭 실패 시 본문은 무시.
-    여러 브랜드가 본문에 나열된 업계 동향 기사를 잘못 태깅하는 것을 방지.
+    핵심 원칙:
+    - 기사 제목에 브랜드명이 명시적으로 등장해야만 매칭
+    - 본문에만 브랜드가 언급된 기사는 오태깅 위험이 높으므로 무조건 제외
+    - 제목에 2개 이상 브랜드가 있으면 '비교 기사'이므로 제외
     """
-    text = title + " " + desc
-
     # === 삼성/현대 false-positive 방지 ===
     for brand_key, rules in BRAND_FALSE_POSITIVES.items():
-        if any(fi in text for fi in rules["false_indicators"]):
-            if rules["true_indicator"] not in text:
+        if any(fi in title for fi in rules["false_indicators"]):
+            if rules["true_indicator"] not in title:
                 return None, None
 
     # === SSG 오매칭 방지 (SSG랜더스, 신세계그룹 등) ===
-    if any(sf in text for sf in SSG_FALSE_KEYWORDS):
-        if "SSG닷컴" not in text and "쓱닷컴" not in text:
+    if any(sf in title for sf in SSG_FALSE_KEYWORDS):
+        if "SSG닷컴" not in title and "쓱닷컴" not in title:
             return None, None
 
-    # === "당근" 오매칭 방지 (일반 단어 당근 vs 당근마켓) ===
-    if "당근" in text and not any(dk in text for dk in DANGGEUN_TRUE_KEYWORDS):
-        pass
-
-    # === 1단계: 제목(title)에서 브랜드 매칭 (최우선) ===
-    for keyword, (brand, bc) in BRAND_MAP.items():
-        if keyword in title:
-            if keyword == "당근" and not any(dk in title for dk in DANGGEUN_TRUE_KEYWORDS):
-                continue
-            return brand, bc
-
-    # === 2단계: 제목에서 매칭 실패 시, 본문 매칭은 매우 엄격하게 ===
-    # 본문에 브랜드가 여러 개 언급된 업계 동향 기사 방지
-    # → 본문에서 정확히 1개 브랜드만 발견된 경우만 매칭
+    # === 제목에서 브랜드 매칭 (유일한 매칭 경로) ===
     found_brands = []
     for keyword, (brand, bc) in BRAND_MAP.items():
-        if keyword in desc:
-            if keyword == "당근" and not any(dk in desc for dk in DANGGEUN_TRUE_KEYWORDS):
+        if keyword in title:
+            # "당근" 오매칭 방지
+            if "당근" in keyword and not any(dk in title for dk in DANGGEUN_TRUE_KEYWORDS):
                 continue
             if (brand, bc) not in found_brands:
                 found_brands.append((brand, bc))
 
-    # 본문에서 정확히 1개 브랜드만 발견 + 그 브랜드가 검색 쿼리의 주체일 때만 매칭
+    # ★ 정확히 1개 브랜드만 매칭된 경우만 허용
+    # 2개 이상이면 비교/나열 기사이므로 제외
     if len(found_brands) == 1:
         return found_brands[0]
+
+    if len(found_brands) > 1:
+        print(f"    [다중브랜드] 제목에 {len(found_brands)}개 브랜드 → 제외: {title[:50]}")
 
     return None, None
 
@@ -395,7 +403,7 @@ def fetch_naver_news() -> list:
                 except Exception:
                     date = datetime.now().strftime("%Y-%m-%d")
 
-                # 날짜 필터: 이번 달 기사만
+                # 날짜 필터: 최근 14일 기사만
                 if not is_recent_enough(date):
                     print(f"    [날짜제외] {date} {title[:30]}...")
                     continue
@@ -404,6 +412,19 @@ def fetch_naver_news() -> list:
                 if is_noise(title, desc):
                     print(f"    [노이즈] {title[:30]}...")
                     continue
+
+                # ★ v4: 검색 쿼리의 expect_brand가 제목에 있는지 확인
+                expect_brand = qinfo.get("expect_brand", "")
+                if expect_brand:
+                    brand_in_title = False
+                    for kw, (bn, _) in BRAND_MAP.items():
+                        if bn == expect_brand or kw == expect_brand:
+                            if kw in title:
+                                brand_in_title = True
+                                break
+                    if not brand_in_title:
+                        print(f"    [브랜드불일치] 기대={expect_brand}, 제목={title[:40]}...")
+                        continue
 
                 articles.append({
                     "title": title,
@@ -438,47 +459,57 @@ def fetch_naver_news() -> list:
     return unique
 
 
-def ai_validate_article(article: dict) -> bool:
-    """Claude API로 기사 관련성 검증 (True=통과, False=제외)
-    ★ 실패 시 기본값을 False로 변경 (보수적 필터링)
+def ai_validate_article(article: dict, detected_brand: str = None) -> bool:
+    """★ v4: Claude API로 기사 관련성 검증 (브랜드 일치 여부 포함)
+    - detected_brand: 제목에서 감지된 브랜드명을 함께 전달하여 교차 검증
+    - 실패 시 기본값 False (보수적 필터링)
     """
     if not ANTHROPIC_API_KEY:
-        return False  # API 없으면 전부 제외 (안전장치)
+        return False
 
     is_mkt = article.get("_qtype") == "marketing"
+    brand_context = ""
+    if detected_brand:
+        brand_context = f"\n감지된 브랜드: {detected_brand}"
 
-    prompt = f"""다음 뉴스 기사가 "국내 핀테크/이커머스 트렌드 트래커"에 게시할 만한 기사인지 판단하세요.
+    prompt = f"""당신은 "국내 핀테크/이커머스 트렌드 트래커" 편집자입니다. 아래 기사가 게시 기준에 부합하는지 엄격하게 판단하세요.
 
 제목: {article['title']}
-요약: {article['desc']}
+요약: {article['desc']}{brand_context}
 
-[반드시 "yes"인 경우]:
-- 네이버페이/카카오페이/토스/쿠팡 등 국내 핀테크 서비스의 신규 기능, 업데이트, 정책 변화
-- 무신사/올리브영/컬리/배민 등 국내 이커머스 플랫폼의 서비스 변경이나 전략적 캠페인
-- 신한카드/삼성카드/현대카드/KB카드 등 국내 카드사의 결제 서비스 관련 뉴스
-- PM/서비스 기획자에게 인사이트를 줄 수 있는 국내 플랫폼 전략 뉴스
+[핵심 판단 기준 — 아래 3가지를 모두 충족해야 "yes"]:
+1. 기사의 주인공(subject)이 반드시 위 '감지된 브랜드'의 서비스여야 함
+   - 해당 브랜드가 단순히 언급/비교되는 것은 "no"
+   - 다른 기업이 주어이고 감지된 브랜드는 배경으로만 등장하면 "no"
+2. 기사 내용이 해당 브랜드의 서비스 변화(신기능/업데이트/개편/전략적 캠페인)에 관한 것이어야 함
+   - 단순 기업 소식(인사/실적/채용/IR)은 "no"
+   - 업계 전반 동향이나 여러 기업 나열형 기사는 "no"
+3. 기사 날짜가 최근 2주 이내여야 하고, 과거 이벤트의 재탕 기사가 아니어야 함
 
-[반드시 "no"인 경우]:
-- 트럼프/관세/무역/정치/외교/시사 뉴스 (핀테크 언급이 곁들여져도 no)
+[무조건 "no"인 경우]:
+- 트럼프/관세/무역/정치/외교/시사 (핀테크 언급이 곁들여져도 no)
 - 단순 할인/쿠폰/적립금/캐시백 프로모션 안내
-- 교육/채용/세미나/컨퍼런스/부트캠프 소식
-- 주가/실적/IR/투자/IPO/상장 관련 뉴스
-- 해외 기업(아마존/메타/애플/구글) 중심 뉴스
-- 제조업/반도체/자동차/부동산 등 비관련 산업 뉴스
-- 여러 기업 이름을 나열하는 뉴스 브리프/라운드업
-- 특정 플랫폼의 서비스와 직접 관련 없이 기업명만 언급된 기사
-- SSG랜더스(야구)/스포츠/연예 뉴스
-- 기사 제목에 브랜드명이 있지만 실제 내용은 해당 브랜드의 서비스와 무관한 기사"""
+- 교육/채용/세미나/컨퍼런스/부트캠프
+- 주가/실적/IR/투자/IPO/상장
+- 해외 기업(아마존/메타/애플/구글) 중심
+- 제조업/반도체/자동차/부동산
+- 뉴스 브리프/라운드업 (여러 기업 나열)
+- SSG랜더스(야구)/스포츠/연예
+- 기사 제목에 브랜드명이 있으나 실제로는 다른 주제인 기사
+- 2개 이상 브랜드가 비교·나열되는 기사"""
 
     if is_mkt:
         prompt += """
 
-[마케팅 이벤트 추가 기준] (위 기준에 더해 아래도 모두 충족해야 "yes"):
-- 반드시 특정 브랜드의 전략적 캠페인이어야 함 (글로벌 팝업, 브랜드 콜라보, 문화 마케팅 등)
-- 단순 "~% 할인", "~원 쿠폰" 같은 프로모션은 절대 "no"
-- 기사 내용이 해당 브랜드의 마케팅 전략이나 캠페인에 대한 분석/소개여야 함"""
+[마케팅 이벤트 추가 기준]:
+- 반드시 해당 브랜드의 전략적 캠페인이어야 함 (팝업/콜라보/문화마케팅)
+- 단순 "~% 할인", "~원 쿠폰"은 절대 "no"
+- 이미 종료된 과거 캠페인의 후기/회고 기사도 "no" """
 
-    prompt += '\n\n"yes" 또는 "no"만 답해주세요.'
+    prompt += """
+
+의심스러우면 반드시 "no"를 선택하세요. 확실한 경우에만 "yes"입니다.
+"yes" 또는 "no"만 답해주세요."""
 
     try:
         resp = requests.post(
@@ -630,7 +661,7 @@ def save_data(items: list):
 
 def main():
     print("=" * 60)
-    print("Trend Tracker v3 - 뉴스 업데이트")
+    print("Trend Tracker v4 - 뉴스 업데이트 (강화 필터링)")
     print("=" * 60)
     print(f"  실행 시각: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"  AI 분석: {'활성' if ANTHROPIC_API_KEY else '비활성'}")
@@ -677,7 +708,7 @@ def main():
     new_articles = [a for a in raw_articles if a["title"][:30] not in existing_titles]
     print(f"\n[4] 신규 기사 후보: {len(new_articles)}건 (중복 제거 후)")
 
-    # 6. 브랜드 매칭 필터 (★ 브랜드 미매칭 = 무조건 제외)
+    # 6. ★ v4: 제목 전용 브랜드 매칭 (본문 매칭 완전 제거)
     branded = []
     for a in new_articles:
         brand, bc = detect_brand(a["title"], a["desc"])
@@ -687,11 +718,12 @@ def main():
             print(f"  [브랜드X] {a['title'][:50]}...")
     print(f"\n[5] 브랜드 매칭: {len(branded)}건 통과 ({len(new_articles)-len(branded)}건 제외)")
 
-    # 7. AI 관련성 검증 (Claude Haiku로 엄격 필터링)
+    # 7. ★ v4: AI 관련성 검증 (브랜드명 포함하여 교차 검증)
     validated = []
     for i, article in enumerate(branded[:15]):
-        print(f"  [AI검증 {i+1}/{min(len(branded),15)}] {article['title'][:40]}...", end="")
-        if ai_validate_article(article):
+        brand, _ = detect_brand(article["title"], article["desc"])
+        print(f"  [AI검증 {i+1}/{min(len(branded),15)}] [{brand}] {article['title'][:35]}...", end="")
+        if ai_validate_article(article, detected_brand=brand):
             validated.append(article)
             print(" -> 통과")
         else:
@@ -716,7 +748,6 @@ def main():
     print(f"\n[7] 신규 추가: {len(new_items)}건")
 
     # 9. 병합: 큐레이션 기사 우선 보호
-    # 큐레이션 기사는 항상 유지, 나머지는 날짜순 정렬 후 MAX_ITEMS까지
     auto_items = new_items + non_curated
 
     # 오래된 뉴스 삭제 (큐레이션 기사는 제외)
