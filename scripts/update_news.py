@@ -178,6 +178,11 @@ EXCLUDE_KEYWORDS = [
     "메타 중소기업", "Meta ", "구글 클라우드", "마이크로소프트",
     "알리익스프레스", "테무", "쉬인", "틱톡 커머스",
 
+    # === 기업 일반/경영 기사 (서비스 업데이트 아님) ===
+    "[기업家]", "[기업가]", "기업 분석", "경영 전략", "CEO 인터뷰",
+    "수수료 논쟁", "수수료 갈등", "수수료 부담",
+    "직매입", "월 1억 셀러",
+
     # === 스포츠/엔터/연예 ===
     "SSG랜더스", "SSG 랜더스", "프로야구", "축구", "올림픽",
     "아이돌", "드라마", "영화 개봉", "콘서트 티켓",
@@ -227,7 +232,11 @@ def generate_id(title: str) -> int:
 
 
 def detect_brand(title: str, desc: str) -> tuple:
-    """기사 내용에서 브랜드 감지 (정밀 매칭). 매칭 실패 시 None 반환"""
+    """기사 내용에서 브랜드 감지 (정밀 매칭). 매칭 실패 시 None 반환.
+
+    핵심 로직: 제목(title)에서 먼저 매칭 시도 → 제목 매칭 실패 시 본문은 무시.
+    여러 브랜드가 본문에 나열된 업계 동향 기사를 잘못 태깅하는 것을 방지.
+    """
     text = title + " " + desc
 
     # === 삼성/현대 false-positive 방지 ===
@@ -242,18 +251,30 @@ def detect_brand(title: str, desc: str) -> tuple:
             return None, None
 
     # === "당근" 오매칭 방지 (일반 단어 당근 vs 당근마켓) ===
-    # "당근" 키워드 매칭 전에, 진짜 당근마켓 기사인지 확인
     if "당근" in text and not any(dk in text for dk in DANGGEUN_TRUE_KEYWORDS):
-        # "당근마켓", "당근 앱" 등이 없으면 매칭하지 않음
-        pass  # BRAND_MAP에서 "당근" 매칭이 되지 않도록 아래에서 처리
+        pass
 
-    # === 브랜드 매핑 (정밀 키워드 매칭) ===
+    # === 1단계: 제목(title)에서 브랜드 매칭 (최우선) ===
     for keyword, (brand, bc) in BRAND_MAP.items():
-        if keyword in text:
-            # "당근" 단독 키워드는 추가 검증 필요
-            if keyword == "당근" and not any(dk in text for dk in DANGGEUN_TRUE_KEYWORDS):
-                continue  # 진짜 당근마켓 기사가 아니면 건너뜀
+        if keyword in title:
+            if keyword == "당근" and not any(dk in title for dk in DANGGEUN_TRUE_KEYWORDS):
+                continue
             return brand, bc
+
+    # === 2단계: 제목에서 매칭 실패 시, 본문 매칭은 매우 엄격하게 ===
+    # 본문에 브랜드가 여러 개 언급된 업계 동향 기사 방지
+    # → 본문에서 정확히 1개 브랜드만 발견된 경우만 매칭
+    found_brands = []
+    for keyword, (brand, bc) in BRAND_MAP.items():
+        if keyword in desc:
+            if keyword == "당근" and not any(dk in desc for dk in DANGGEUN_TRUE_KEYWORDS):
+                continue
+            if (brand, bc) not in found_brands:
+                found_brands.append((brand, bc))
+
+    # 본문에서 정확히 1개 브랜드만 발견 + 그 브랜드가 검색 쿼리의 주체일 때만 매칭
+    if len(found_brands) == 1:
+        return found_brands[0]
 
     return None, None
 
