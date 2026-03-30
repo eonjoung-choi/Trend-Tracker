@@ -260,6 +260,44 @@ def generate_id(title: str) -> int:
     return int(h, 16) % 90000 + 10000
 
 
+def is_duplicate_article(title_a: str, title_b: str) -> bool:
+    """★ v4: 강화된 중복 감지 — 제목 유사도 + 핵심명사 비교
+
+    3가지 기준 중 하나라도 통과하면 중복으로 판단:
+    1. 제목 앞 20자 일치
+    2. bigram 유사도 0.5 이상 (기존 0.6에서 강화)
+    3. 같은 브랜드 + 핵심명사 3개 이상 겹침 (신규)
+    """
+    clean_a = re.sub(r"[^가-힣a-zA-Z0-9]", "", title_a)
+    clean_b = re.sub(r"[^가-힣a-zA-Z0-9]", "", title_b)
+
+    # 기준 1: 앞 20자 일치
+    if clean_a[:20] == clean_b[:20]:
+        return True
+
+    # 기준 2: bigram 유사도 (0.6 → 0.5로 강화)
+    bigrams_a = set(clean_a[i:i+2] for i in range(len(clean_a)-1))
+    bigrams_b = set(clean_b[i:i+2] for i in range(len(clean_b)-1))
+    if bigrams_a and bigrams_b:
+        overlap = len(bigrams_a & bigrams_b) / min(len(bigrams_a), len(bigrams_b))
+        if overlap > 0.5:
+            return True
+
+    # 기준 3: 핵심 명사(2글자 이상 한글 단어) 3개 이상 겹침
+    nouns_a = set(re.findall(r"[가-힣]{2,}", title_a))
+    nouns_b = set(re.findall(r"[가-힣]{2,}", title_b))
+    # 불용어 제거 (너무 흔한 단어)
+    stopwords = {"서비스", "출시", "도입", "기능", "업데이트", "확대", "개편", "론칭",
+                 "국내", "최초", "올해", "이번", "진행", "발표", "시작", "예정"}
+    nouns_a -= stopwords
+    nouns_b -= stopwords
+    common_nouns = nouns_a & nouns_b
+    if len(common_nouns) >= 3:
+        return True
+
+    return False
+
+
 def detect_brand(title: str, desc: str) -> tuple:
     """★ v4: 제목(title) 전용 브랜드 매칭. 본문(desc) 매칭 완전 제거.
 
@@ -450,23 +488,10 @@ def fetch_naver_news() -> list:
         except Exception as e:
             print(f"  [Naver] 검색 실패 [{query}]: {e}")
 
-    # 중복 제거 (bigram 유사도)
+    # ★ v4: 강화된 중복 제거
     unique = []
     for a in articles:
-        title_clean = re.sub(r"[^가-힣a-zA-Z0-9]", "", a["title"])
-        is_dup = False
-        for existing_a in unique:
-            existing_clean = re.sub(r"[^가-힣a-zA-Z0-9]", "", existing_a["title"])
-            if title_clean[:20] == existing_clean[:20]:
-                is_dup = True
-                break
-            words_a = set(title_clean[i:i+2] for i in range(len(title_clean)-1))
-            words_b = set(existing_clean[i:i+2] for i in range(len(existing_clean)-1))
-            if words_a and words_b:
-                overlap = len(words_a & words_b) / min(len(words_a), len(words_b))
-                if overlap > 0.6:
-                    is_dup = True
-                    break
+        is_dup = any(is_duplicate_article(a["title"], ex["title"]) for ex in unique)
         if not is_dup:
             unique.append(a)
     return unique
@@ -696,29 +721,22 @@ def main():
     naver_articles = fetch_naver_news()
     print(f"\n[3] 네이버 검색: {len(naver_articles)}건")
 
-    # 4. 합산 후 중복 제거 (제목 유사도 기반)
+    # 4. ★ v4: 강화된 중복 제거 (수집 기사 간)
     all_raw = rss_articles + naver_articles
     raw_articles = []
     for a in all_raw:
-        title_clean = re.sub(r"[^가-힣a-zA-Z0-9]", "", a["title"])
-        is_dup = False
-        for existing_a in raw_articles:
-            existing_clean = re.sub(r"[^가-힣a-zA-Z0-9]", "", existing_a["title"])
-            if title_clean[:20] == existing_clean[:20]:
-                is_dup = True
-                break
-            words_a = set(title_clean[i:i+2] for i in range(len(title_clean)-1))
-            words_b = set(existing_clean[i:i+2] for i in range(len(existing_clean)-1))
-            if words_a and words_b:
-                overlap = len(words_a & words_b) / min(len(words_a), len(words_b))
-                if overlap > 0.6:
-                    is_dup = True
-                    break
+        is_dup = any(is_duplicate_article(a["title"], ex["title"]) for ex in raw_articles)
         if not is_dup:
             raw_articles.append(a)
 
-    # 5. 기존 뉴스와 중복 제거
-    new_articles = [a for a in raw_articles if a["title"][:30] not in existing_titles]
+    # 5. ★ v4: 기존 뉴스와 중복 제거 (강화된 비교)
+    new_articles = []
+    for a in raw_articles:
+        is_dup = any(is_duplicate_article(a["title"], ex["title"]) for ex in existing)
+        if not is_dup:
+            new_articles.append(a)
+        else:
+            print(f"  [중복] 기존 기사와 유사: {a['title'][:40]}...")
     print(f"\n[4] 신규 기사 후보: {len(new_articles)}건 (중복 제거 후)")
 
     # 6. ★ v4: 제목 전용 브랜드 매칭 (본문 매칭 완전 제거)
