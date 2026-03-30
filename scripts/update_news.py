@@ -46,25 +46,38 @@ KEYWORDS = [
 # ★ v4: 브랜드명 필수 + "출시/업데이트/개편" 등 서비스 변화 키워드 조합
 # 광범위 쿼리 제거, 각 쿼리에 expect_brand 지정 (결과 검증용)
 NAVER_SEARCH_QUERIES = [
-    # 서비스 업데이트 — 브랜드+변화 키워드
+    # ── 핀테크/결제 ──
     {"q": "네이버페이 출시", "type": "service", "expect_brand": "네이버페이"},
-    {"q": "네이버페이 업데이트", "type": "service", "expect_brand": "네이버페이"},
+    {"q": "네이버페이 도입", "type": "service", "expect_brand": "네이버페이"},
     {"q": "카카오페이 출시", "type": "service", "expect_brand": "카카오페이"},
-    {"q": "카카오페이 신기능", "type": "service", "expect_brand": "카카오페이"},
+    {"q": "카카오페이 도입", "type": "service", "expect_brand": "카카오페이"},
     {"q": "토스 출시 서비스", "type": "service", "expect_brand": "토스"},
-    {"q": "토스뱅크 업데이트", "type": "service", "expect_brand": "토스"},
+    {"q": "토스뱅크 도입", "type": "service", "expect_brand": "토스"},
+    {"q": "토스페이 확대", "type": "service", "expect_brand": "토스"},
+    # ── 이커머스 ──
     {"q": "쿠팡이츠 서비스", "type": "service", "expect_brand": "쿠팡"},
     {"q": "쿠팡 로켓배송 개편", "type": "service", "expect_brand": "쿠팡"},
-    {"q": "배달의민족 서비스 개편", "type": "service", "expect_brand": "배달의민족"},
-    {"q": "배달의민족 신기능", "type": "service", "expect_brand": "배달의민족"},
+    {"q": "배달의민족 서비스", "type": "service", "expect_brand": "배달의민족"},
+    {"q": "배달의민족 도입", "type": "service", "expect_brand": "배달의민족"},
+    {"q": "11번가 서비스", "type": "service", "expect_brand": "11번가"},
+    {"q": "11번가 리뉴얼", "type": "service", "expect_brand": "11번가"},
+    {"q": "G마켓 서비스", "type": "service", "expect_brand": "G마켓"},
+    {"q": "SSG닷컴 서비스", "type": "service", "expect_brand": "SSG닷컴"},
+    # ── 카드사 ──
     {"q": "신한카드 서비스", "type": "service", "expect_brand": "신한카드"},
     {"q": "삼성카드 결제 서비스", "type": "service", "expect_brand": "삼성카드"},
     {"q": "현대카드 결제 서비스", "type": "service", "expect_brand": "현대카드"},
-    # 마케팅 이벤트 — 브랜드+캠페인 키워드
+    {"q": "KB국민카드 서비스", "type": "service", "expect_brand": "KB국민"},
+    {"q": "하나카드 서비스", "type": "service", "expect_brand": "하나카드"},
+    # ── 버티컬커머스 ──
+    {"q": "무신사 서비스", "type": "service", "expect_brand": "무신사"},
     {"q": "무신사 팝업 콜라보", "type": "marketing", "expect_brand": "무신사"},
-    {"q": "올리브영 신규 서비스", "type": "marketing", "expect_brand": "올리브영"},
-    {"q": "컬리 서비스 전략", "type": "marketing", "expect_brand": "컬리"},
+    {"q": "올리브영 서비스", "type": "service", "expect_brand": "올리브영"},
+    {"q": "올리브영 론칭", "type": "marketing", "expect_brand": "올리브영"},
+    {"q": "컬리 서비스", "type": "service", "expect_brand": "컬리"},
     {"q": "당근마켓 광고 플랫폼", "type": "marketing", "expect_brand": "당근마켓"},
+    {"q": "지그재그 서비스", "type": "service", "expect_brand": "지그재그"},
+    {"q": "에이블리 서비스", "type": "service", "expect_brand": "에이블리"},
 ]
 
 # ── 브랜드 매핑 (정밀 키워드만, 모호한 단어 배제) ──
