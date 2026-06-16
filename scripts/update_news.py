@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-Trend Tracker 뉴스 자동 수집 스크립트 v4
+Trend Tracker 뉴스 자동 수집 스크립트 v5
+- 대상: 핀테크 / 전통금융(카드사·은행)만 수집 (이커머스·버티컬커머스·마케팅이벤트 제외)
 - 수동 큐레이션 기사 보호 (curated=true 플래그)
-- 네이버 뉴스 검색 API로 핀테크/이커머스 뉴스 수집
+- 네이버 뉴스 검색 API로 금융 서비스 뉴스 수집
 - 6단계 필터링: 날짜→노이즈→브랜드(제목Only)→AI검증(브랜드명포함)→분석→최종검증
 - news_data.json 업데이트
 """
@@ -10,6 +11,7 @@ Trend Tracker 뉴스 자동 수집 스크립트 v4
 import json
 import os
 import re
+import html
 import hashlib
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -18,102 +20,126 @@ from urllib.parse import quote
 import feedparser
 import requests
 
+
+# ── ★ v6: 텍스트 정제 유틸 ──
+def clean_text(s: str) -> str:
+    """HTML 태그 제거 + 엔티티 디코딩(&apos; &quot; &amp; 등) + 공백 정리.
+    네이버/RSS 원문에 남는 &apos;, &quot;, &lt; 등이 화면에 그대로 노출되는 문제를 막는다.
+    """
+    if not s:
+        return ""
+    s = re.sub(r"<[^>]+>", " ", s)          # 태그 제거
+    s = html.unescape(s)                     # 엔티티 → 실제 문자
+    s = html.unescape(s)                     # 이중 인코딩(&amp;apos;) 대비 한 번 더
+    s = s.replace("​", "").replace("﻿", "")
+    s = re.sub(r"\s+", " ", s).strip()       # 연속 공백 정리
+    return s
+
+
+def smart_truncate(s: str, limit: int = 150) -> str:
+    """단어/문장 경계에서 자연스럽게 자르고 '…'을 붙인다.
+    desc[:120]처럼 단어 중간에서 끊겨 '…15일 네'가 노출되던 문제를 개선.
+    """
+    s = (s or "").strip()
+    if len(s) <= limit:
+        return s
+    cut = s[:limit]
+    # 문장 부호(. 다/요/음 등) 우선, 없으면 마지막 공백에서 절단
+    m = re.search(r"[.!?…](?!.*[.!?…])", cut)
+    if m and m.end() >= limit * 0.6:
+        return cut[:m.end()].strip()
+    sp = cut.rfind(" ")
+    if sp >= limit * 0.6:
+        cut = cut[:sp]
+    return cut.strip() + "…"
+
 # ── 설정 ──
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "")
 NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "")
 NEWS_DATA_PATH = Path(__file__).parent.parent / "news_data.json"
-MAX_ITEMS = 20  # 최대 보관 뉴스 수
+MAX_ITEMS = 50  # ★ v6: 사이트 노출 최대 뉴스 수 (최신순 최대 50개)
 DAYS_TO_KEEP = 60  # 60일 이상 된 뉴스 삭제
 # ★ v4: 최근 14일 이내 기사만 수집 (과거 기사 유입 차단 강화)
 MIN_DATE = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
 
-# ── 타겟 키워드 (핀테크/이커머스 서비스 관련만) ──
+# ── 타겟 키워드 (핀테크 / 전통금융 + 글로벌 결제·핀테크) ──
 KEYWORDS = [
-    # 핀테크/결제 서비스
-    "네이버페이", "카카오페이", "토스뱅크", "토스페이", "쿠팡페이",
-    "간편결제", "모바일결제", "QR결제", "페이스페이", "안면인식결제",
-    # 이커머스/플랫폼 서비스
-    "쿠팡이츠", "쿠팡 로켓", "로켓배송", "배달의민족",
-    "무신사", "올리브영", "컬리", "마켓컬리",
-    "SSG닷컴", "쓱닷컴", "롯데온", "G마켓", "지마켓", "11번가",
-    "당근마켓",
-    # 카드사
+    # 핀테크 / 결제·인터넷은행 서비스
+    "네이버페이", "카카오페이", "토스뱅크", "토스페이", "토스증권",
+    "카카오뱅크", "케이뱅크", "페이코",
+    "간편결제", "모바일결제", "QR결제", "안면인식결제",
+    "오픈뱅킹", "마이데이터", "송금",
+    # 전통금융 (카드사)
     "신한카드", "삼성카드", "현대카드", "KB카드", "KB국민카드",
+    "우리카드", "하나카드", "롯데카드",
+    # 전통금융 (은행) ★ v6
+    "KB국민은행", "국민은행", "신한은행", "하나은행", "우리은행",
+    "NH농협은행", "농협은행", "IBK기업은행", "기업은행",
+    # 글로벌 결제·핀테크 ★ v6 (해외 탭)
+    "비자", "마스터카드", "페이팔", "스트라이프", "알리페이",
+    "위챗페이", "클라르나", "레볼루트", "아멕스",
 ]
 
 # ── 네이버 뉴스 검색 쿼리 ──
 # ★ v4: 브랜드명 필수 + "출시/업데이트/개편" 등 서비스 변화 키워드 조합
 # 광범위 쿼리 제거, 각 쿼리에 expect_brand 지정 (결과 검증용)
 NAVER_SEARCH_QUERIES = [
-    # ── 핀테크/결제 ──
-    {"q": "네이버페이 출시", "type": "service", "expect_brand": "네이버페이"},
-    {"q": "네이버페이 도입", "type": "service", "expect_brand": "네이버페이"},
-    {"q": "카카오페이 출시", "type": "service", "expect_brand": "카카오페이"},
-    {"q": "카카오페이 도입", "type": "service", "expect_brand": "카카오페이"},
-    {"q": "토스 출시 서비스", "type": "service", "expect_brand": "토스"},
-    {"q": "토스뱅크 도입", "type": "service", "expect_brand": "토스"},
-    {"q": "토스페이 확대", "type": "service", "expect_brand": "토스"},
-    # ── 이커머스 ──
-    {"q": "쿠팡이츠 서비스", "type": "service", "expect_brand": "쿠팡"},
-    {"q": "쿠팡 로켓배송 개편", "type": "service", "expect_brand": "쿠팡"},
-    {"q": "배달의민족 서비스", "type": "service", "expect_brand": "배달의민족"},
-    {"q": "배달의민족 도입", "type": "service", "expect_brand": "배달의민족"},
-    {"q": "11번가 서비스", "type": "service", "expect_brand": "11번가"},
-    {"q": "11번가 리뉴얼", "type": "service", "expect_brand": "11번가"},
-    {"q": "G마켓 서비스", "type": "service", "expect_brand": "G마켓"},
-    {"q": "SSG닷컴 서비스", "type": "service", "expect_brand": "SSG닷컴"},
-    # ── 카드사 ──
+    # ── ★ v6: 자사(현대카드) 앱·디지털 프로덕트 최우선 ──
+    {"q": "현대카드 앱 개편", "type": "service", "expect_brand": "현대카드"},
+    {"q": "현대카드 앱 리뉴얼", "type": "service", "expect_brand": "현대카드"},
+    {"q": "현대카드 앱 업데이트", "type": "service", "expect_brand": "현대카드"},
+    {"q": "현대카드 앱 신규 기능", "type": "service", "expect_brand": "현대카드"},
+    {"q": "현대카드 UX 개선", "type": "service", "expect_brand": "현대카드"},
+    {"q": "현대카드 M포인트 몰", "type": "service", "expect_brand": "현대카드"},
+    {"q": "현대카드 디지털 서비스", "type": "service", "expect_brand": "현대카드"},
+    # ── 동종 카드사 앱/디지털 (벤치마킹) ──
+    {"q": "신한카드 앱 개편", "type": "service", "expect_brand": "신한카드"},
+    {"q": "신한 쏠페이 앱", "type": "service", "expect_brand": "신한카드"},
+    {"q": "삼성카드 앱 개편", "type": "service", "expect_brand": "삼성카드"},
+    {"q": "KB페이 앱 개편", "type": "service", "expect_brand": "KB국민"},
+    {"q": "우리카드 앱 리뉴얼", "type": "service", "expect_brand": "우리카드"},
+    {"q": "하나카드 앱 개편", "type": "service", "expect_brand": "하나카드"},
+    {"q": "롯데카드 앱 개편", "type": "service", "expect_brand": "롯데카드"},
+    # ── 핀테크 앱/기능 (벤치마킹) ──
+    {"q": "네이버페이 앱 업데이트", "type": "service", "expect_brand": "네이버페이"},
+    {"q": "카카오페이 앱 개편", "type": "service", "expect_brand": "카카오페이"},
+    {"q": "토스 앱 업데이트", "type": "service", "expect_brand": "토스"},
+    {"q": "카카오뱅크 앱 신규 기능", "type": "service", "expect_brand": "카카오뱅크"},
+    {"q": "케이뱅크 앱 개편", "type": "service", "expect_brand": "케이뱅크"},
+    {"q": "페이코 앱 업데이트", "type": "service", "expect_brand": "페이코"},
+    # ── 은행 앱/서비스 ★ v6 (국내) ──
+    {"q": "KB국민은행 앱 개편", "type": "service", "expect_brand": "KB국민은행"},
+    {"q": "신한은행 앱 개편", "type": "service", "expect_brand": "신한은행"},
+    {"q": "하나은행 앱 서비스", "type": "service", "expect_brand": "하나은행"},
+    {"q": "우리은행 앱 개편", "type": "service", "expect_brand": "우리은행"},
+    {"q": "IBK기업은행 앱 서비스", "type": "service", "expect_brand": "IBK기업은행"},
+    {"q": "NH농협은행 앱 서비스", "type": "service", "expect_brand": "NH농협은행"},
+    # ── 글로벌 결제·핀테크 ★ v6 (해외 탭) ──
+    {"q": "비자 결제 서비스", "type": "service", "expect_brand": "비자"},
+    {"q": "마스터카드 결제", "type": "service", "expect_brand": "마스터카드"},
+    {"q": "페이팔 서비스", "type": "service", "expect_brand": "페이팔"},
+    {"q": "스트라이프 결제", "type": "service", "expect_brand": "스트라이프"},
+    {"q": "알리페이 서비스", "type": "service", "expect_brand": "알리페이"},
+    # ── 일반 서비스 변화 (앱 외 정책/신상품도 보조 수집) ──
+    {"q": "현대카드 서비스 출시", "type": "service", "expect_brand": "현대카드"},
     {"q": "신한카드 서비스", "type": "service", "expect_brand": "신한카드"},
-    {"q": "삼성카드 결제 서비스", "type": "service", "expect_brand": "삼성카드"},
-    {"q": "현대카드 결제 서비스", "type": "service", "expect_brand": "현대카드"},
-    {"q": "KB국민카드 서비스", "type": "service", "expect_brand": "KB국민"},
-    {"q": "하나카드 서비스", "type": "service", "expect_brand": "하나카드"},
-    # ── 버티컬커머스 ──
-    {"q": "무신사 서비스", "type": "service", "expect_brand": "무신사"},
-    {"q": "무신사 팝업 콜라보", "type": "marketing", "expect_brand": "무신사"},
-    {"q": "올리브영 서비스", "type": "service", "expect_brand": "올리브영"},
-    {"q": "올리브영 론칭", "type": "marketing", "expect_brand": "올리브영"},
-    {"q": "컬리 서비스", "type": "service", "expect_brand": "컬리"},
-    {"q": "당근마켓 광고 플랫폼", "type": "marketing", "expect_brand": "당근마켓"},
-    {"q": "지그재그 서비스", "type": "service", "expect_brand": "지그재그"},
-    {"q": "에이블리 서비스", "type": "service", "expect_brand": "에이블리"},
+    {"q": "토스뱅크 서비스 도입", "type": "service", "expect_brand": "토스"},
+    {"q": "네이버페이 도입", "type": "service", "expect_brand": "네이버페이"},
 ]
 
-# ── 브랜드 매핑 (정밀 키워드만, 모호한 단어 배제) ──
+# ── 국내 브랜드 매핑 (정밀 키워드만, 모호한 단어 배제) ──
 BRAND_MAP = {
+    # ── 핀테크 / 결제·인터넷은행 ──
     "네이버페이": ("네이버페이", "b-naver"),
-    "네이버쇼핑": ("네이버페이", "b-naver"),
-    "네이버플러스": ("네이버페이", "b-naver"),
-    "네이버플러스 스토어": ("네이버페이", "b-naver"),
     "카카오페이": ("카카오페이", "b-kakao"),
-    "카카오톡 선물": ("카카오페이", "b-kakao"),
-    "카카오툴즈": ("카카오페이", "b-kakao"),
+    "카카오뱅크": ("카카오뱅크", "b-kakaobank"),
+    "케이뱅크": ("케이뱅크", "b-kbank"),
     "토스뱅크": ("토스", "b-toss"),
     "토스페이": ("토스", "b-toss"),
     "토스증권": ("토스", "b-toss"),
-    "쿠팡이츠": ("쿠팡", "b-coupang"),
-    "쿠팡페이": ("쿠팡", "b-coupang"),
-    "쿠팡 로켓": ("쿠팡", "b-coupang"),
-    "로켓배송": ("쿠팡", "b-coupang"),
-    "쿠팡 와우": ("쿠팡", "b-coupang"),
-    "배달의민족": ("배달의민족", "b-baemin"),
-    "배민": ("배달의민족", "b-baemin"),
-    "무신사": ("무신사", "b-musinsa"),
-    "올리브영": ("올리브영", "b-oliveyoung"),
-    "컬리": ("컬리", "b-kurly"),
-    "마켓컬리": ("컬리", "b-kurly"),
-    "SSG닷컴": ("SSG닷컴", "b-ssg"),
-    "쓱닷컴": ("SSG닷컴", "b-ssg"),
-    "롯데온": ("롯데온", "b-lotte"),
-    "당근마켓": ("당근마켓", "b-carrot"),
-    "지그재그": ("지그재그", "b-zigzag"),
-    "에이블리": ("에이블리", "b-ably"),
-    "다이소몰": ("다이소", "b-daiso"),
-    "G마켓": ("G마켓", "b-gmarket"),
-    "지마켓": ("G마켓", "b-gmarket"),
-    "옥션": ("G마켓", "b-gmarket"),
-    "11번가": ("11번가", "b-11st"),
+    "페이코": ("페이코", "b-payco"),
+    # ── 전통금융 (카드사) ──
     "신한카드": ("신한카드", "b-shinhan"),
     "KB국민카드": ("KB국민", "b-kb"),
     "KB카드": ("KB국민", "b-kb"),
@@ -121,7 +147,35 @@ BRAND_MAP = {
     "현대카드": ("현대카드", "b-hyundai"),
     "우리카드": ("우리카드", "b-woori"),
     "하나카드": ("하나카드", "b-hana"),
+    "롯데카드": ("롯데카드", "b-lottecard"),
+    # ── 전통금융 (은행) ★ v6 추가 ──
+    "KB국민은행": ("KB국민은행", "b-kbbank"),
+    "국민은행": ("KB국민은행", "b-kbbank"),
+    "신한은행": ("신한은행", "b-shinhanbank"),
+    "하나은행": ("하나은행", "b-hanabank"),
+    "우리은행": ("우리은행", "b-wooribank"),
+    "NH농협은행": ("농협은행", "b-nh"),
+    "농협은행": ("농협은행", "b-nh"),
+    "IBK기업은행": ("IBK기업은행", "b-ibk"),
+    "기업은행": ("IBK기업은행", "b-ibk"),
 }
+
+# ── 해외(글로벌) 결제·핀테크 브랜드 매핑 ★ v6 — '해외' 탭용 ──
+# 한글 표기만 매칭(영문 전용 기사는 한글판과 중복되므로 제외 → 중복 방지)
+FOREIGN_BRAND_MAP = {
+    "비자": ("Visa", "b-visa"),
+    "마스터카드": ("Mastercard", "b-mc"),
+    "페이팔": ("PayPal", "b-paypal"),
+    "스트라이프": ("Stripe", "b-stripe"),
+    "알리페이": ("Alipay", "b-alipay"),
+    "위챗페이": ("WeChat Pay", "b-wechat"),
+    "클라르나": ("Klarna", "b-klarna"),
+    "레볼루트": ("Revolut", "b-revolut"),
+    "아멕스": ("Amex", "b-amex"),
+    "아메리칸 익스프레스": ("Amex", "b-amex"),
+}
+# 해외로 분류할 브랜드 표시명 집합 (region 판정용)
+FOREIGN_BRANDS = {v[0] for v in FOREIGN_BRAND_MAP.values()}
 
 # ── 브랜드 오인 방지 (false-positive 감지) ──
 BRAND_FALSE_POSITIVES = {
@@ -142,25 +196,71 @@ BRAND_FALSE_POSITIVES = {
     },
 }
 
-# ── SSG 오매칭 방지 ──
-SSG_FALSE_KEYWORDS = [
-    "SSG랜더스", "SSG 랜더스", "신세계그룹", "신세계백화점", "신세계면세점",
-    "이마트", "스타필드", "SSG 그룹", "신세계인터내셔날", "신세계프라퍼티",
-]
-
-# ── "당근" 오매칭 방지 ──
-DANGGEUN_TRUE_KEYWORDS = [
-    "당근마켓", "당근 앱", "당근 광고", "당근 플랫폼", "당근 서비스",
-    "당근 비즈", "당근페이", "당근 중고", "당근 동네",
-]
-
-# ── 업권 매핑 ──
+# ── 업권 매핑 (핀테크 / 전통금융 2개만) ──
 SECTOR_KEYWORDS = {
-    "핀테크": ["간편결제", "핀테크", "페이", "결제", "금융", "대출", "인증", "생체", "토스뱅크", "토스페이", "토스증권", "카카오뱅크", "케이뱅크"],
-    "전통금융": ["신한카드", "KB국민카드", "삼성카드", "현대카드", "우리은행", "하나은행", "농협"],
-    "이커머스": ["쿠팡", "SSG닷컴", "롯데온", "11번가", "G마켓", "이커머스", "온라인쇼핑"],
-    "버티컬커머스": ["무신사", "올리브영", "컬리", "배달", "당근마켓", "지그재그", "에이블리", "다이소"],
+    "핀테크": ["간편결제", "핀테크", "페이", "결제", "송금", "인증", "생체", "오픈뱅킹", "마이데이터",
+              "네이버페이", "카카오페이", "페이코", "토스뱅크", "토스페이", "토스증권", "카카오뱅크", "케이뱅크",
+              "비자", "마스터카드", "페이팔", "스트라이프", "알리페이", "위챗페이"],
+    "전통금융": ["신한카드", "KB국민카드", "KB카드", "삼성카드", "현대카드", "우리카드", "하나카드", "롯데카드",
+               "신한은행", "국민은행", "KB국민은행", "우리은행", "하나은행", "농협은행", "기업은행", "카드사", "은행"],
 }
+
+# ── ★ v6: 앱/디지털 프로덕트 관점 키워드 ──
+# 우리 조직(현대카드 앱·웹·M포인트몰)의 관심사: 앱/웹의 기능 변화, 신규 업데이트, 리뉴얼, UX 개선.
+# 아래 키워드가 제목/요약에 많을수록 '앱 관련성' 점수가 높아지고, 수집·노출에서 우선순위를 갖는다.
+APP_KEYWORDS_STRONG = [   # 앱 변화임을 강하게 시사 (가중치 3)
+    "앱 개편", "앱 리뉴얼", "앱 업데이트", "앱 출시", "앱 새단장", "앱 전면 개편",
+    "어플 개편", "애플리케이션 개편", "UI 개편", "UX 개선", "화면 개편", "인터페이스 개편",
+    "사용성 개선", "디자인 개편", "전면 리뉴얼", "리뉴얼 오픈", "앱 리뉴",
+    "신규 기능", "기능 추가", "기능 업데이트", "메인 화면 개편", "홈 화면 개편",
+    "간편로그인", "간편 로그인", "생체인증", "얼굴인식", "안면인식", "개인화 추천",
+]
+APP_KEYWORDS_WEAK = [     # 디지털/앱 맥락 신호 (가중치 1)
+    "앱", "어플", "애플리케이션", "모바일 앱", "모바일앱", "웹", "홈페이지", "웹사이트",
+    "온라인", "디지털", "플랫폼", "서비스 개편", "리뉴얼", "개편", "업데이트", "새단장",
+    "UI", "UX", "사용성", "화면", "인터페이스", "디자인", "베타", "사전예약", "오픈",
+    "로그인", "인증", "알림", "위젯", "홈 화면", "메인 화면", "개인화", "맞춤",
+    "멤버십", "포인트몰", "M포인트", "엠포인트", "구독", "적립", "월렛", "지갑",
+    "간편결제", "간편송금", "오픈뱅킹", "마이데이터", "API", "연동", "탑재", "론칭",
+]
+
+# 자사 브랜드 — 수집·우선순위에서 추가 가중치 부여
+OWN_BRAND = "현대카드"
+
+
+def app_relevance(title: str, desc: str) -> int:
+    """앱/디지털 프로덕트 관점의 관련성 점수.
+    강한 신호(앱 개편/UX 개선/신규 기능 등)는 3점, 약한 신호는 1점으로 합산.
+    """
+    text = title + " " + desc
+    score = 0
+    for kw in APP_KEYWORDS_STRONG:
+        if kw in text:
+            score += 3
+    for kw in APP_KEYWORDS_WEAK:
+        if kw in text:
+            score += 1
+    # 제목에 신호가 있으면 본문보다 비중 ↑
+    for kw in APP_KEYWORDS_STRONG:
+        if kw in title:
+            score += 2
+            break
+    return score
+
+
+def priority_key(article: dict):
+    """수집 후보 정렬용 키: (유효 앱점수, 자사 여부, 공식 여부, 날짜) 내림차순.
+    앱 관점 소식을 가장 먼저 AI 검증·분석·노출시키되, 자사(현대카드) 앱 소식에는
+    소폭 가중치를 더해 경쟁사 기사에 밀려 묻히지 않도록 한다.
+    """
+    title = article.get("title", "")
+    desc = article.get("desc", "")
+    app_s = app_relevance(title, desc)
+    is_own = 1 if OWN_BRAND in title else 0
+    is_official = 1 if article.get("_official") else 0
+    # 자사 + 앱 관련 소식이면 앱점수에 보너스(+4)로 상단 유지
+    effective = app_s + (4 if (is_own and app_s > 0) else 0)
+    return (effective, is_own, is_official, article.get("date", ""))
 
 # ── 노이즈 제거: 제외 키워드 (대폭 확장) ──
 EXCLUDE_KEYWORDS = [
@@ -175,6 +275,12 @@ EXCLUDE_KEYWORDS = [
     "세미나", "컨퍼런스", "부트캠프", "워크숍", "아카데미",
     "실적 발표", "주가", "시가총액", "배당", "공시", "IR",
     "영업이익", "순이익", "분기 실적",
+
+    # === 공식 보도자료 노이즈: 인사/조달/실적 (뉴스룸 피드 대응) ===
+    "정기인사", "임원 인사", "임원인사", "임부서장", "승진 인사", "조직 개편 인사",
+    "포모사본드", "변동금리부채권", "ABS 발행", "회사채 발행", "후순위채",
+    "신종자본증권", "유상증자", "자산유동화증권", "지속가능채권",
+    "사회공헌", "봉사활동", "헌혈", "임직원 봉사",
 
     # === 비관련 산업/기업 (삼성 계열) ===
     "삼성전자", "삼성 쇼핑", "삼성 TV", "삼성디스플레이", "삼성 갤럭시",
@@ -243,7 +349,7 @@ EXCLUDE_KEYWORDS = [
     "AI 반도체", "AI 칩", "데이터센터",
 ]
 
-# ── RSS 피드 목록 ──
+# ── RSS 피드 목록 (언론사) ──
 RSS_FEEDS = [
     {"url": "https://rss.etnews.com/Section901.xml", "name": "전자신문"},
     {"url": "https://rss.etnews.com/Section902.xml", "name": "전자신문 금융"},
@@ -251,6 +357,26 @@ RSS_FEEDS = [
     {"url": "https://www.inews24.com/rss/news_it.xml", "name": "아이뉴스24"},
     {"url": "https://www.dt.co.kr/rss/today.xml", "name": "디지털타임스"},
     {"url": "https://www.bloter.net/rss", "name": "블로터"},
+]
+
+# ── 공식 뉴스룸/보도자료 피드 ──
+# ★ v5: 금융사 공식 보도자료(뉴스룸) 소스 추가.
+#   뉴스와이어(Korea Newswire)의 '분야별 RSS'를 사용하면 카드사·은행·핀테크 등
+#   각 금융사가 직접 배포한 보도자료를 회사별 ID 없이 한 번에 수집할 수 있다.
+#   (산업 분류 번호: 카드=202, 핀테크=207, 은행과 금융=201, 금융 전체=200)
+#   이 피드의 기사는 '공식 발표'이므로 _official=True로 표시해 출처를 '○○ 뉴스룸'으로 라벨링하고,
+#   언론사 RSS보다 우선순위를 둔다. (단, 인사/실적/IR 등은 AI 검증 단계에서 동일하게 걸러짐)
+NEWSROOM_FEEDS = [
+    {"url": "https://api.newswire.co.kr/rss/industry/202", "name": "뉴스와이어 카드"},
+    {"url": "https://api.newswire.co.kr/rss/industry/207", "name": "뉴스와이어 핀테크"},
+    {"url": "https://api.newswire.co.kr/rss/industry/201", "name": "뉴스와이어 은행·금융"},
+]
+# 특정 금융사만 콕 집어 구독하고 싶을 때 사용하는 회사별 RSS (선택).
+#   주소 형식: https://www.newswire.co.kr/companyNews?content=rss&no=<회사ID>
+#   회사ID는 newswire.co.kr에서 '○○ 보도자료' 페이지의 URL(no=) 값.
+#   예) 신한카드=669. 필요하면 아래에 추가하면 NEWSROOM_FEEDS와 동일하게 처리된다.
+NEWSROOM_COMPANY_FEEDS = [
+    # {"url": "https://www.newswire.co.kr/companyNews?content=rss&no=669", "name": "신한카드 뉴스룸"},
 ]
 
 
@@ -312,30 +438,34 @@ def detect_brand(title: str, desc: str) -> tuple:
             if rules["true_indicator"] not in title:
                 return None, None
 
-    # === SSG 오매칭 방지 (SSG랜더스, 신세계그룹 등) ===
-    if any(sf in title for sf in SSG_FALSE_KEYWORDS):
-        if "SSG닷컴" not in title and "쓱닷컴" not in title:
-            return None, None
-
-    # === 제목에서 브랜드 매칭 (유일한 매칭 경로) ===
-    found_brands = []
+    # === 1) 국내 브랜드 우선 매칭 ===
+    # 국내 브랜드가 주어이면(예: '신한카드, 비자와 제휴') 해외 브랜드가 함께 있어도 국내로 본다
+    found = []
     for keyword, (brand, bc) in BRAND_MAP.items():
-        if keyword in title:
-            # "당근" 오매칭 방지
-            if "당근" in keyword and not any(dk in title for dk in DANGGEUN_TRUE_KEYWORDS):
-                continue
-            if (brand, bc) not in found_brands:
-                found_brands.append((brand, bc))
+        if keyword in title and (brand, bc) not in found:
+            found.append((brand, bc))
+    if len(found) == 1:
+        return found[0]
+    if len(found) > 1:
+        print(f"    [다중브랜드] 제목에 국내 {len(found)}개 브랜드 → 제외: {title[:50]}")
+        return None, None
 
-    # ★ 정확히 1개 브랜드만 매칭된 경우만 허용
-    # 2개 이상이면 비교/나열 기사이므로 제외
-    if len(found_brands) == 1:
-        return found_brands[0]
-
-    if len(found_brands) > 1:
-        print(f"    [다중브랜드] 제목에 {len(found_brands)}개 브랜드 → 제외: {title[:50]}")
+    # === 2) 국내 브랜드가 없을 때만 해외(글로벌) 브랜드 매칭 ===
+    foreign = []
+    for keyword, (brand, bc) in FOREIGN_BRAND_MAP.items():
+        if keyword in title and (brand, bc) not in foreign:
+            foreign.append((brand, bc))
+    if len(foreign) == 1:
+        return foreign[0]
+    if len(foreign) > 1:
+        print(f"    [다중브랜드] 제목에 해외 {len(foreign)}개 브랜드 → 제외: {title[:50]}")
 
     return None, None
+
+
+def region_of(brand: str) -> str:
+    """브랜드 표시명으로 국내/해외 판정"""
+    return "해외" if brand in FOREIGN_BRANDS else "국내"
 
 
 def detect_sector(title: str, desc: str) -> str:
@@ -388,9 +518,8 @@ def fetch_rss_news() -> list:
         try:
             feed = feedparser.parse(feed_info["url"])
             for entry in feed.entries[:20]:
-                title = entry.get("title", "").strip()
-                desc = entry.get("summary", entry.get("description", "")).strip()
-                desc = re.sub(r"<[^>]+>", "", desc).strip()
+                title = clean_text(entry.get("title", ""))
+                desc = clean_text(entry.get("summary", entry.get("description", "")))
                 link = entry.get("link", "")
                 date = parse_date(entry)
 
@@ -401,7 +530,7 @@ def fetch_rss_news() -> list:
                 if is_relevant(title, desc) and not is_noise(title, desc):
                     articles.append({
                         "title": title,
-                        "desc": desc[:120],
+                        "desc": smart_truncate(desc, 150),
                         "url": link,
                         "source": feed_info["name"],
                         "date": date,
@@ -416,6 +545,55 @@ def fetch_rss_news() -> list:
         short = a["title"][:30]
         if short not in seen_titles:
             seen_titles.add(short)
+            unique.append(a)
+    return unique
+
+
+def fetch_newsroom_news() -> list:
+    """★ v5: 금융사 공식 뉴스룸/보도자료(뉴스와이어 RSS)에서 수집.
+
+    - 언론사 RSS와 달리 is_relevant(키워드) 게이트를 적용하지 않음
+      (분야 RSS 자체가 카드/핀테크/은행이므로 금융 관련성은 이미 보장됨)
+    - 브랜드 매칭은 이후 공통 파이프라인(detect_brand, 제목 기준)에서 처리
+    - _official=True 로 표시해 출처를 '○○ 뉴스룸'으로 라벨링하고 우선순위 부여
+    """
+    articles = []
+    for feed_info in NEWSROOM_FEEDS + NEWSROOM_COMPANY_FEEDS:
+        try:
+            feed = feedparser.parse(feed_info["url"])
+            for entry in feed.entries[:30]:
+                title = clean_text(entry.get("title", ""))
+                desc = clean_text(entry.get("summary", entry.get("description", "")))
+                link = entry.get("link", "")
+                date = parse_date(entry)
+
+                # 날짜 필터
+                if not is_recent_enough(date):
+                    continue
+
+                # 노이즈만 1차 제거 (키워드 게이트는 생략)
+                if is_noise(title, desc):
+                    continue
+
+                articles.append({
+                    "title": title,
+                    "desc": smart_truncate(desc, 150),
+                    "url": link,
+                    "source": feed_info["name"],
+                    "date": date,
+                    "_qtype": "service",
+                    "_official": True,
+                })
+        except Exception as e:
+            print(f"  [뉴스룸] {feed_info['name']} 실패: {e}")
+
+    # 제목 기준 중복 제거
+    seen = set()
+    unique = []
+    for a in articles:
+        short = a["title"][:30]
+        if short not in seen:
+            seen.add(short)
             unique.append(a)
     return unique
 
@@ -444,8 +622,8 @@ def fetch_naver_news() -> list:
 
             items = resp.json().get("items", [])
             for item in items:
-                title = re.sub(r"<[^>]+>", "", item.get("title", "")).strip()
-                desc = re.sub(r"<[^>]+>", "", item.get("description", "")).strip()
+                title = clean_text(item.get("title", ""))
+                desc = clean_text(item.get("description", ""))
                 link = item.get("originallink") or item.get("link", "")
                 pub_date = item.get("pubDate", "")
                 try:
@@ -464,11 +642,11 @@ def fetch_naver_news() -> list:
                     print(f"    [노이즈] {title[:30]}...")
                     continue
 
-                # ★ v4: 검색 쿼리의 expect_brand가 제목에 있는지 확인
+                # ★ v4: 검색 쿼리의 expect_brand가 제목에 있는지 확인 (국내+해외 맵 모두 조회)
                 expect_brand = qinfo.get("expect_brand", "")
                 if expect_brand:
                     brand_in_title = False
-                    for kw, (bn, _) in BRAND_MAP.items():
+                    for kw, (bn, _) in {**BRAND_MAP, **FOREIGN_BRAND_MAP}.items():
                         if bn == expect_brand or kw == expect_brand:
                             if kw in title:
                                 brand_in_title = True
@@ -479,7 +657,7 @@ def fetch_naver_news() -> list:
 
                 articles.append({
                     "title": title,
-                    "desc": desc[:120],
+                    "desc": smart_truncate(desc, 150),
                     "url": link,
                     "source": "네이버뉴스",
                     "date": date,
@@ -505,12 +683,11 @@ def ai_validate_article(article: dict, detected_brand: str = None) -> bool:
     if not ANTHROPIC_API_KEY:
         return False
 
-    is_mkt = article.get("_qtype") == "marketing"
     brand_context = ""
     if detected_brand:
         brand_context = f"\n감지된 브랜드: {detected_brand}"
 
-    prompt = f"""당신은 "국내 핀테크/이커머스 트렌드 트래커" 편집자입니다. 아래 기사가 게시 기준에 부합하는지 엄격하게 판단하세요.
+    prompt = f"""당신은 "금융/핀테크 트렌드 트래커" 편집자입니다(국내 카드·은행·간편결제 + 글로벌 결제·핀테크 기업 Visa·Mastercard·PayPal·Stripe·Alipay 등 포함). 아래 기사가 게시 기준에 부합하는지 엄격하게 판단하세요.
 
 제목: {article['title']}
 요약: {article['desc']}{brand_context}
@@ -529,22 +706,18 @@ def ai_validate_article(article: dict, detected_brand: str = None) -> bool:
 - 단순 할인/쿠폰/적립금/캐시백 프로모션 안내
 - 교육/채용/세미나/컨퍼런스/부트캠프
 - 주가/실적/IR/투자/IPO/상장
-- 해외 기업(아마존/메타/애플/구글) 중심
+- 금융·결제와 무관한 해외 빅테크(아마존/메타/애플 제품/구글/넷플릭스/테슬라) 중심 → "no"
+  단, Visa·Mastercard·PayPal·Stripe·Alipay 등 '글로벌 결제·핀테크 기업'의 결제/금융 서비스 변화는 "yes" 가능
 - 제조업/반도체/자동차/부동산
+- 이커머스·쇼핑·배달·유통 플랫폼 중심 기사 (쿠팡/네이버쇼핑/배달의민족/무신사/올리브영/컬리/11번가 등) — 결제·금융 서비스가 아닌 쇼핑/물류 소식이면 "no"
+- 단순 마케팅·프로모션·팝업·콜라보 캠페인 (서비스/정책 변화가 아닌 홍보성 이벤트)
 - 뉴스 브리프/라운드업 (여러 기업 나열)
-- SSG랜더스(야구)/스포츠/연예
+- 스포츠/연예
 - 기사 제목에 브랜드명이 있으나 실제로는 다른 주제인 기사
-- 2개 이상 브랜드가 비교·나열되는 기사"""
+- 2개 이상 브랜드가 비교·나열되는 기사
 
-    if is_mkt:
-        prompt += """
-
-[마케팅 이벤트 추가 기준]:
-- 반드시 해당 브랜드의 전략적 캠페인이어야 함 (팝업/콜라보/문화마케팅)
-- 단순 "~% 할인", "~원 쿠폰"은 절대 "no"
-- 이미 종료된 과거 캠페인의 후기/회고 기사도 "no" """
-
-    prompt += """
+[수집 대상 = 국내 카드·은행·간편결제 + 글로벌 결제·핀테크의 '서비스·정책 변화']
+- 결제/송금/인증/금융상품/앱 기능의 출시·개편·정책 변경에 해당해야 "yes"
 
 의심스러우면 반드시 "no"를 선택하세요. 확실한 경우에만 "yes"입니다.
 "yes" 또는 "no"만 답해주세요."""
@@ -573,77 +746,133 @@ def ai_validate_article(article: dict, detected_brand: str = None) -> bool:
     return False  # ★ 실패 시 제외 (보수적)
 
 
-def enrich_with_ai(article: dict, is_event: bool = False) -> dict:
-    """Claude API로 상세 분석 생성"""
+def _extract_json(text: str):
+    """모델 응답에서 JSON 객체를 안전하게 추출.
+    ```json 코드펜스 제거 + 중괄호 균형을 맞춰 첫 번째 완결 객체를 파싱한다.
+    (기존엔 greedy 정규식 하나라 앞뒤 잡텍스트가 있으면 깨질 수 있었음)
+    """
+    if not text:
+        return None
+    t = text.strip()
+    t = re.sub(r"^```(?:json)?", "", t).strip()
+    t = re.sub(r"```$", "", t).strip()
+    start = t.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(t)):
+        c = t[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+        else:
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(t[start:i + 1])
+                    except Exception:
+                        return None
+    return None
+
+
+def _enrich_fallback(article: dict, ok: bool = False) -> dict:
+    """AI 분석 실패 시의 폴백.
+    detail은 단어 중간에서 잘리지 않도록 원문을 문장 경계로 정리해서 사용한다.
+    _ok=False 이면 호출부에서 게시를 건너뛴다(무의미한 placeholder 노출 방지).
+    """
+    base = smart_truncate(clean_text(article.get("desc", "")), 180)
+    return {
+        "detail": base or article.get("title", ""),
+        "impact_text": "",
+        "why": "",
+        "tags": [],
+        "type": "정책 변화",
+        "tc": "t-policy",
+        "app": app_relevance(article.get("title", ""), article.get("desc", "")) >= 3,
+        "imp": 3,
+        "il": "보통",
+        "_ok": ok,
+    }
+
+
+def enrich_with_ai(article: dict) -> dict:
+    """Claude API로 상세 분석 생성. 실패 시 _ok=False 폴백을 반환한다."""
     if not ANTHROPIC_API_KEY:
-        return {
-            "detail": article["desc"],
-            "impact_text": "이 소식이 사용자 경험에 미치는 영향을 확인해보세요.",
-            "why": "핀테크/이커머스 시장의 최신 동향으로, 서비스 기획 시 참고할 만한 사례입니다.",
-            "tags": [],
-            "type": "마케팅 이벤트" if is_event else "정책 변화",
-            "tc": "t-event" if is_event else "t-policy",
-            "imp": 3,
-            "il": "보통",
-        }
+        # 키가 없으면 분석 불가 → 폴백(_ok=False). 게시 단계에서 건너뜀.
+        return _enrich_fallback(article, ok=False)
 
-    event_hint = ""
-    if is_event:
-        event_hint = "\n이 기사는 마케팅 이벤트/캠페인 관련 뉴스입니다. type은 '마케팅 이벤트', tc는 't-event'로 설정해주세요."
-
-    prompt = f"""다음 뉴스를 PM/서비스 기획자 관점에서 분석해주세요.{event_hint}
+    prompt = f"""당신은 현대카드의 디지털 프로덕트(앱·웹·M포인트몰)를 만드는 팀의 PM/프로덕트 기획자입니다.
+아래 뉴스를 '앱/디지털 프로덕트 관점'에서 분석해주세요.
 
 제목: {article['title']}
 요약: {article['desc']}
 
+분석 지침:
+- impact_text와 why는 앱/웹 사용자 경험과 프로덕트 기획 관점에 초점을 둡니다
+  (예: 화면·플로우 변화, 신규 기능, 로그인/인증/결제 UX, 멤버십·포인트, 개인화, 접근성).
+- 이 소식이 앱/디지털 서비스의 변화(신규·기능 개선)와 관련되면 type="기능 업데이트",
+  화면·플로우·사용성 등 UX 중심 변화면 "UX 개선", 앱과 무관한 단순 정책·상품 소식이면 "정책 변화"로 둡니다.
+- "app" 필드: 기사가 앱/웹/디지털 프로덕트의 변화(기능·화면·UX·멤버십몰 등)와 관련되면 true, 아니면 false.
+
 아래 JSON 형식으로만 응답해주세요 (다른 텍스트 없이):
 {{
   "detail": "3-4문장, 해요체로 핵심 내용 설명",
-  "impact_text": "2-3문장, 사용자에게 어떤 영향이 있는지",
-  "why": "2-3문장, 실무에서 참고할 포인트",
+  "impact_text": "2-3문장, 앱/디지털 사용자에게 어떤 영향이 있는지",
+  "why": "2-3문장, 현대카드 앱·웹·M포인트몰 기획 시 참고할 포인트",
   "tags": ["키워드1", "키워드2", "키워드3"],
-  "type": "신규 기능|기능 업데이트|정책 변화|UX 개선|마케팅 이벤트",
-  "tc": "t-new|t-update|t-policy|t-ux|t-event",
+  "type": "기능 업데이트|정책 변화|UX 개선",
+  "tc": "t-update|t-policy|t-ux",
+  "app": true,
   "imp": 3~5,
   "il": "높음|보통"
 }}"""
 
-    try:
-        resp = requests.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": ANTHROPIC_API_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 1024,
-                "messages": [{"role": "user", "content": prompt}],
-            },
-            timeout=30,
-        )
-        if resp.status_code == 200:
+    # ★ v6: 최대 2회 시도 + 견고한 JSON 파싱 + 결과 검증
+    for attempt in range(2):
+        try:
+            resp = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": ANTHROPIC_API_KEY,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-sonnet-4-20250514",
+                    "max_tokens": 1024,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                print(f"    [AI분석] HTTP {resp.status_code} (시도 {attempt+1}/2)")
+                continue
             text = resp.json()["content"][0]["text"]
-            match = re.search(r"\{[\s\S]*\}", text)
-            if match:
-                return json.loads(match.group())
-    except Exception as e:
-        print(f"  [AI분석] 실패: {e}")
+            data = _extract_json(text)
+            # 핵심 3개 필드(변경점/사용자 영향/실무 포인트)가 모두 의미있게 채워졌는지 검증
+            if data and all(str(data.get(k, "")).strip() for k in ("detail", "impact_text", "why")):
+                data["_ok"] = True
+                return data
+            print(f"    [AI분석] 필수 필드 누락/파싱 실패 (시도 {attempt+1}/2)")
+        except Exception as e:
+            print(f"    [AI분석] 예외: {e} (시도 {attempt+1}/2)")
 
-    return {
-        "detail": article["desc"],
-        "impact_text": "이 소식이 사용자 경험에 미치는 영향을 확인해보세요.",
-        "why": "핀테크/이커머스 시장의 최신 동향으로, 서비스 기획 시 참고할 만한 사례입니다.",
-        "tags": [],
-        "type": "마케팅 이벤트" if is_event else "정책 변화",
-        "tc": "t-event" if is_event else "t-policy",
-        "imp": 3,
-        "il": "보통",
-    }
+    # 2회 모두 실패 → 게시 건너뛸 폴백
+    return _enrich_fallback(article, ok=False)
 
 
-def build_news_item(article: dict, enrichment: dict, is_event: bool = False) -> dict:
+def build_news_item(article: dict, enrichment: dict) -> dict:
     """뉴스 아이템 JSON 구조 생성"""
     brand, bc = detect_brand(article["title"], article["desc"])
     sector = detect_sector(article["title"], article["desc"])
@@ -652,6 +881,29 @@ def build_news_item(article: dict, enrichment: dict, is_event: bool = False) -> 
     if not tags:
         text = article["title"] + " " + article["desc"]
         tags = [kw for kw in KEYWORDS if kw in text][:3]
+
+    # ★ v5: 공식 뉴스룸 출처는 '○○ 보도자료(뉴스룸)'으로 라벨링
+    if article.get("_official"):
+        src_t = f"{brand} 보도자료" if brand else article["source"]
+        src_ty = "뉴스룸"
+    else:
+        src_t = article["source"]
+        src_ty = "기사"
+
+    # ★ v6: 앱/디지털 프로덕트 관련성 — AI 판단(app)과 키워드 점수를 함께 사용
+    app_score = app_relevance(article["title"], article["desc"])
+    ai_app = enrichment.get("app")
+    is_app = bool(ai_app) if ai_app is not None else (app_score >= 3)
+
+    # ★ v6: 태그 일원화 — '신규 기능/신규 서비스'(t-new)를 '기능 업데이트'(t-update)로 통합
+    e_type = enrichment.get("type", "정책 변화")
+    e_tc = enrichment.get("tc", "t-policy")
+    if e_tc == "t-new" or e_type in ("신규 기능", "신규 서비스"):
+        e_type, e_tc = "기능 업데이트", "t-update"
+
+    # type이 앱 변화 계열이면 앱으로 간주
+    if e_tc in ("t-update", "t-ux") and app_score > 0:
+        is_app = True
 
     return {
         "id": generate_id(article["title"]),
@@ -663,14 +915,18 @@ def build_news_item(article: dict, enrichment: dict, is_event: bool = False) -> 
         "brand": brand,
         "bc": bc,
         "sector": sector,
-        "type": enrichment.get("type", "마케팅 이벤트" if is_event else "정책 변화"),
-        "tc": enrichment.get("tc", "t-event" if is_event else "t-policy"),
+        "region": region_of(brand),
+        "type": e_type,
+        "tc": e_tc,
         "tags": tags[:3],
         "imp": enrichment.get("imp", 3),
         "il": enrichment.get("il", "보통"),
         "date": article["date"],
-        "isEvent": is_event or enrichment.get("type") == "마케팅 이벤트",
-        "src": [{"t": article["source"], "url": article["url"], "ty": "기사"}],
+        "isEvent": False,
+        "official": bool(article.get("_official")),
+        "app": is_app,
+        "app_score": app_score,
+        "src": [{"t": src_t, "url": article["url"], "ty": src_ty}],
     }
 
 
@@ -699,11 +955,12 @@ def save_data(items: list):
 
 def main():
     print("=" * 60)
-    print("Trend Tracker v4 - 뉴스 업데이트 (강화 필터링)")
+    print("Trend Tracker v6 - 뉴스 업데이트 (핀테크/전통금융 + 공식 뉴스룸, 앱 관점 우선)")
     print("=" * 60)
     print(f"  실행 시각: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"  AI 분석: {'활성' if ANTHROPIC_API_KEY else '비활성'}")
     print(f"  네이버 검색: {'활성' if NAVER_CLIENT_ID else '비활성'}")
+    print(f"  공식 뉴스룸 피드: {len(NEWSROOM_FEEDS) + len(NEWSROOM_COMPANY_FEEDS)}개")
     print(f"  최소 날짜: {MIN_DATE}")
 
     # 1. 기존 데이터 로드 → curated 기사 보호
@@ -713,16 +970,21 @@ def main():
     existing_titles = {item["title"][:30] for item in existing}
     print(f"\n[1] 기존 뉴스: {len(existing)}건 (큐레이션 {len(curated)}건 보호)")
 
-    # 2. RSS에서 뉴스 수집
+    # 2. 금융사 공식 뉴스룸(보도자료) 수집  ★ v5 신규
+    newsroom_articles = fetch_newsroom_news()
+    print(f"\n[2] 공식 뉴스룸 수집: {len(newsroom_articles)}건")
+
+    # 3. RSS에서 뉴스 수집 (언론사)
     rss_articles = fetch_rss_news()
-    print(f"\n[2] RSS 수집: {len(rss_articles)}건")
+    print(f"\n[3] 언론 RSS 수집: {len(rss_articles)}건")
 
-    # 3. 네이버 뉴스 검색
+    # 4. 네이버 뉴스 검색
     naver_articles = fetch_naver_news()
-    print(f"\n[3] 네이버 검색: {len(naver_articles)}건")
+    print(f"\n[4] 네이버 검색: {len(naver_articles)}건")
 
-    # 4. ★ v4: 강화된 중복 제거 (수집 기사 간)
-    all_raw = rss_articles + naver_articles
+    # 5. ★ v4: 강화된 중복 제거 (수집 기사 간)
+    #    공식 뉴스룸을 맨 앞에 두어 동일 사안일 때 공식 보도자료가 우선 채택되도록 함
+    all_raw = newsroom_articles + naver_articles + rss_articles
     raw_articles = []
     for a in all_raw:
         is_dup = any(is_duplicate_article(a["title"], ex["title"]) for ex in raw_articles)
@@ -737,7 +999,7 @@ def main():
             new_articles.append(a)
         else:
             print(f"  [중복] 기존 기사와 유사: {a['title'][:40]}...")
-    print(f"\n[4] 신규 기사 후보: {len(new_articles)}건 (중복 제거 후)")
+    print(f"\n[5] 신규 기사 후보: {len(new_articles)}건 (중복 제거 후)")
 
     # 6. ★ v4: 제목 전용 브랜드 매칭 (본문 매칭 완전 제거)
     branded = []
@@ -747,27 +1009,39 @@ def main():
             branded.append(a)
         else:
             print(f"  [브랜드X] {a['title'][:50]}...")
-    print(f"\n[5] 브랜드 매칭: {len(branded)}건 통과 ({len(new_articles)-len(branded)}건 제외)")
+    print(f"\n[6] 브랜드 매칭: {len(branded)}건 통과 ({len(new_articles)-len(branded)}건 제외)")
+
+    # ★ v6: 앱 관점 우선순위 정렬 — 앱/UX/리뉴얼·자사(현대카드) 소식이 먼저 검증·분석·노출되도록
+    branded.sort(key=priority_key, reverse=True)
+    app_cnt = sum(1 for a in branded if app_relevance(a["title"], a["desc"]) > 0)
+    print(f"    └ 앱 관점 우선정렬 적용 (앱 관련 후보 {app_cnt}건 상단 배치)")
 
     # 7. ★ v4: AI 관련성 검증 (브랜드명 포함하여 교차 검증)
+    #    공식 뉴스룸 기사도 동일하게 검증해 인사/실적/IR 보도자료를 걸러냄
     validated = []
     for i, article in enumerate(branded[:15]):
         brand, _ = detect_brand(article["title"], article["desc"])
-        print(f"  [AI검증 {i+1}/{min(len(branded),15)}] [{brand}] {article['title'][:35]}...", end="")
+        tag = "공식" if article.get("_official") else "기사"
+        print(f"  [AI검증 {i+1}/{min(len(branded),15)}] [{brand}/{tag}] {article['title'][:32]}...", end="")
         if ai_validate_article(article, detected_brand=brand):
             validated.append(article)
             print(" -> 통과")
         else:
             print(" -> 제외")
-    print(f"\n[6] AI 검증: {len(validated)}건 통과")
+    print(f"\n[7] AI 검증: {len(validated)}건 통과")
 
     # 8. 상세 분석 생성 (최대 5건만 - 품질 우선)
+    #    ★ v6: 분석 실패(_ok=False) 기사는 게시하지 않음 → 잘린 원문/placeholder 노출 방지
     new_items = []
-    for i, article in enumerate(validated[:5]):
-        is_event = article.get("_qtype") == "marketing"
-        print(f"  [분석 {i+1}/{min(len(validated),5)}] {'마케팅' if is_event else '서비스'}: {article['title'][:40]}...")
-        enrichment = enrich_with_ai(article, is_event=is_event)
-        item = build_news_item(article, enrichment, is_event=is_event)
+    for i, article in enumerate(validated[:6]):
+        print(f"  [분석 {i+1}/{min(len(validated),6)}] {article['title'][:40]}...")
+        enrichment = enrich_with_ai(article)
+
+        if not enrichment.get("_ok"):
+            print(f"    -> AI 분석 미완성(상세/영향/포인트 누락), 게시 제외")
+            continue
+
+        item = build_news_item(article, enrichment)
 
         # ★ 최종 안전장치: brand가 None이면 절대 추가하지 않음
         if item["brand"] is None:
@@ -775,8 +1049,10 @@ def main():
             continue
 
         new_items.append(item)
+        if len(new_items) >= 5:
+            break
 
-    print(f"\n[7] 신규 추가: {len(new_items)}건")
+    print(f"\n[8] 신규 추가: {len(new_items)}건")
 
     # 9. 병합: 큐레이션 기사 우선 보호
     auto_items = new_items + non_curated
@@ -795,13 +1071,11 @@ def main():
 
     # 10. 저장
     save_data(all_items)
-    event_count = sum(1 for item in all_items if item.get("isEvent"))
     curated_count = sum(1 for item in all_items if item.get("curated"))
     print(f"\n{'=' * 60}")
     print(f"완료! 총 {len(all_items)}건 저장")
     print(f"  큐레이션: {curated_count}건 (보호)")
-    print(f"  서비스 업데이트: {len(all_items)-event_count}건")
-    print(f"  마케팅 이벤트: {event_count}건")
+    print(f"  서비스 업데이트: {len(all_items)}건")
     print(f"  경로: {NEWS_DATA_PATH}")
     print("=" * 60)
 
