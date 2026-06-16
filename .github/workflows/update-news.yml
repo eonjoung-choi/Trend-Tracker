@@ -2,8 +2,9 @@ name: 📰 뉴스 자동 업데이트
 
 on:
   schedule:
-    # 매일 오전 8시 KST (한국시간) = UTC 23:00 (전날)
-    - cron: '0 23 * * *'
+    # 매일 오전 8시 17분 KST (한국시간) = UTC 23:17 (전날)
+    # ★ 정각(:00)은 GitHub 크론이 몰려 지연·누락이 잦아 비혼잡 시간(:17)으로 조정
+    - cron: '17 23 * * *'
   workflow_dispatch:  # 수동 실행 가능
 
 permissions:
