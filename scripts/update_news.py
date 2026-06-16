@@ -58,8 +58,8 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "")
 NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "")
 NEWS_DATA_PATH = Path(__file__).parent.parent / "news_data.json"
-MAX_ITEMS = 50  # ★ v6: 사이트 노출 최대 뉴스 수 (최신순 최대 50개)
-DAYS_TO_KEEP = 60  # 60일 이상 된 뉴스 삭제
+MAX_ITEMS = 800  # ★ v6: 보관 상한(안전 ceiling). 실제 보관 기간은 DAYS_TO_KEEP가 결정
+DAYS_TO_KEEP = 180  # ★ v6: 최근 180일(6개월) 보관, 이보다 오래된 비고정 기사는 삭제
 # ★ v4: 최근 14일 이내 기사만 수집 (과거 기사 유입 차단 강화)
 MIN_DATE = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
 
@@ -126,6 +126,13 @@ NAVER_SEARCH_QUERIES = [
     {"q": "신한카드 서비스", "type": "service", "expect_brand": "신한카드"},
     {"q": "토스뱅크 서비스 도입", "type": "service", "expect_brand": "토스"},
     {"q": "네이버페이 도입", "type": "service", "expect_brand": "네이버페이"},
+    # ── 시장·동향 (앱분석사·기관 발표) ★ v6 ──
+    {"q": "와이즈앱 금융 앱 사용자", "type": "trend", "expect_brand": "와이즈앱"},
+    {"q": "와이즈앱 간편결제 분석", "type": "trend", "expect_brand": "와이즈앱"},
+    {"q": "모바일인덱스 금융 앱 MAU", "type": "trend", "expect_brand": "모바일인덱스"},
+    {"q": "간편결제 시장 규모", "type": "trend", "expect_brand": ""},
+    {"q": "핀테크 앱 사용자 순위", "type": "trend", "expect_brand": ""},
+    {"q": "카드사 앱 MAU 순위", "type": "trend", "expect_brand": ""},
 ]
 
 # ── 국내 브랜드 매핑 (정밀 키워드만, 모호한 단어 배제) ──
@@ -176,6 +183,40 @@ FOREIGN_BRAND_MAP = {
 }
 # 해외로 분류할 브랜드 표시명 집합 (region 판정용)
 FOREIGN_BRANDS = {v[0] for v in FOREIGN_BRAND_MAP.values()}
+
+# ── 시장·동향 (업계 판세/통계) ★ v6 — 와이즈앱 등 앱분석사·기관 발표 ──
+# 특정 브랜드 기사가 아닌 '시장 규모·점유율·MAU' 같은 판세 기사를 잡는 경로.
+# 제목에 아래 분석사/기관명이 있으면 그 출처를 브랜드로, 없으면 일반 '시장 동향'으로 분류.
+TREND_SOURCES = {
+    "와이즈앱": ("와이즈앱", "b-wiseapp"),
+    "와이즈앱·리테일·굿즈": ("와이즈앱", "b-wiseapp"),
+    "모바일인덱스": ("모바일인덱스", "b-mobileindex"),
+    "아이지에이웍스": ("모바일인덱스", "b-mobileindex"),
+    "닐슨": ("닐슨코리아", "b-nielsen"),
+    "한국은행": ("한국은행", "b-bok"),
+    "여신금융협회": ("여신금융협회", "b-bok"),
+}
+# 시장·동향 시그널 키워드 (제목 기준, 1개만 있어도 판세 기사로 간주)
+TREND_KEYWORDS = [
+    "MAU", "월간 활성", "활성 사용자 수", "시장 규모", "시장 점유율", "점유율",
+    "이용 규모", "이용 현황", "거래액", "4강 구도", "3강 구도", "양강 구도",
+    "과점", "판도", "전자지급", "사용자 순위", "앱 순위", "이용자 순위",
+]
+# 시장·동향으로 강제 분류할 브랜드 표시명 집합
+TREND_BRANDS = {v[0] for v in TREND_SOURCES.values()} | {"시장 동향"}
+
+
+def detect_trend(title: str, desc: str = "") -> tuple:
+    """시장·동향(판세/통계) 기사 감지. (브랜드, bc) 또는 (None, None).
+    - 제목에 분석사/기관명이 있으면 그 출처를 브랜드로
+    - 없으면 시장 통계 키워드가 1개 이상일 때 일반 '시장 동향'
+    """
+    for kw, (b, bc) in TREND_SOURCES.items():
+        if kw in title:
+            return (b, bc)
+    if any(k in title for k in TREND_KEYWORDS):
+        return ("시장 동향", "b-market")
+    return (None, None)
 
 # ── 브랜드 오인 방지 (false-positive 감지) ──
 BRAND_FALSE_POSITIVES = {
@@ -438,6 +479,12 @@ def detect_brand(title: str, desc: str) -> tuple:
             if rules["true_indicator"] not in title:
                 return None, None
 
+    # === 0) 시장·동향 우선 — 분석사/기관(와이즈앱 등) 발표는 브랜드보다 우선 ===
+    #     특정 브랜드가 1위로 언급돼도 '판세 리포트'이므로 시장·동향으로 분류
+    for kw, (b, bc) in TREND_SOURCES.items():
+        if kw in title:
+            return (b, bc)
+
     # === 1) 국내 브랜드 우선 매칭 ===
     # 국내 브랜드가 주어이면(예: '신한카드, 비자와 제휴') 해외 브랜드가 함께 있어도 국내로 본다
     found = []
@@ -447,6 +494,10 @@ def detect_brand(title: str, desc: str) -> tuple:
     if len(found) == 1:
         return found[0]
     if len(found) > 1:
+        # 다중 브랜드라도 분석사(와이즈앱 등) 발표면 시장·동향으로 허용
+        tb = detect_trend(title, desc)
+        if tb[0]:
+            return tb
         print(f"    [다중브랜드] 제목에 국내 {len(found)}개 브랜드 → 제외: {title[:50]}")
         return None, None
 
@@ -459,8 +510,10 @@ def detect_brand(title: str, desc: str) -> tuple:
         return foreign[0]
     if len(foreign) > 1:
         print(f"    [다중브랜드] 제목에 해외 {len(foreign)}개 브랜드 → 제외: {title[:50]}")
+        return None, None
 
-    return None, None
+    # === 3) 브랜드가 없을 때 — 시장·동향(판세/통계) 기사 감지 ===
+    return detect_trend(title, desc)
 
 
 def region_of(brand: str) -> str:
@@ -646,7 +699,7 @@ def fetch_naver_news() -> list:
                 expect_brand = qinfo.get("expect_brand", "")
                 if expect_brand:
                     brand_in_title = False
-                    for kw, (bn, _) in {**BRAND_MAP, **FOREIGN_BRAND_MAP}.items():
+                    for kw, (bn, _) in {**BRAND_MAP, **FOREIGN_BRAND_MAP, **TREND_SOURCES}.items():
                         if bn == expect_brand or kw == expect_brand:
                             if kw in title:
                                 brand_in_title = True
@@ -711,13 +764,18 @@ def ai_validate_article(article: dict, detected_brand: str = None) -> bool:
 - 제조업/반도체/자동차/부동산
 - 이커머스·쇼핑·배달·유통 플랫폼 중심 기사 (쿠팡/네이버쇼핑/배달의민족/무신사/올리브영/컬리/11번가 등) — 결제·금융 서비스가 아닌 쇼핑/물류 소식이면 "no"
 - 단순 마케팅·프로모션·팝업·콜라보 캠페인 (서비스/정책 변화가 아닌 홍보성 이벤트)
-- 뉴스 브리프/라운드업 (여러 기업 나열)
+- 단순 뉴스 브리프/라운드업 (맥락 없이 여러 기업 단신 나열)
 - 스포츠/연예
 - 기사 제목에 브랜드명이 있으나 실제로는 다른 주제인 기사
-- 2개 이상 브랜드가 비교·나열되는 기사
+- 단순히 2개 브랜드를 비교·나열만 하는 기사
 
-[수집 대상 = 국내 카드·은행·간편결제 + 글로벌 결제·핀테크의 '서비스·정책 변화']
-- 결제/송금/인증/금융상품/앱 기능의 출시·개편·정책 변경에 해당해야 "yes"
+[예외 — '시장·동향'으로 "yes" 가능]
+- 와이즈앱·모바일인덱스·닐슨·한국은행·여신금융협회 등 공신력 있는 기관·분석사가 발표한
+  '간편결제/카드/금융 앱'의 시장 규모·점유율·MAU·이용 통계 등 정량 판세 리포트는 여러 기업이 등장해도 "yes".
+  (단, 근거 없는 전망·의견 칼럼이나 단순 순위 나열성 홍보는 "no")
+
+[수집 대상 = 국내 카드·은행·간편결제 + 글로벌 결제·핀테크의 '서비스·정책 변화', 그리고 위 '시장·동향' 리포트]
+- 결제/송금/인증/금융상품/앱 기능의 출시·개편·정책 변경, 또는 공신력 있는 시장·동향 통계에 해당해야 "yes"
 
 의심스러우면 반드시 "no"를 선택하세요. 확실한 경우에만 "yes"입니다.
 "yes" 또는 "no"만 답해주세요."""
@@ -821,8 +879,14 @@ def enrich_with_ai(article: dict) -> dict:
 분석 지침:
 - impact_text와 why는 앱/웹 사용자 경험과 프로덕트 기획 관점에 초점을 둡니다
   (예: 화면·플로우 변화, 신규 기능, 로그인/인증/결제 UX, 멤버십·포인트, 개인화, 접근성).
-- 이 소식이 앱/디지털 서비스의 변화(신규·기능 개선)와 관련되면 type="기능 업데이트",
-  화면·플로우·사용성 등 UX 중심 변화면 "UX 개선", 앱과 무관한 단순 정책·상품 소식이면 "정책 변화"로 둡니다.
+- type은 아래 6가지 중 정확히 하나로 분류합니다(가장 핵심적인 성격 하나만):
+  · "신규 서비스"(t-new): 기존에 없던 새 서비스·상품·앱을 처음 출시·론칭
+  · "기능 업데이트"(t-update): 기존 서비스·기능의 개선·고도화·개편 (이미 있는 것을 더 좋게)
+  · "정책 변화"(t-policy): 약관·수수료·혜택·제도·정책의 변경
+  · "제휴·협력"(t-partner): 타사·기관과의 제휴·파트너십·콜라보·공동사업·MOU
+  · "기술·인프라"(t-tech): AI 에이전트 결제·스테이블코인·토큰화·블록체인 등 차세대 결제기술/인프라
+  · "시장·동향"(t-trend): 시장 규모·점유율·MAU·이용 통계 등 업계 판세 (와이즈앱·모바일인덱스·한국은행 등 분석 발표)
+  ※ '신규 서비스'와 '기능 업데이트' 구분이 핵심: 없던 걸 새로 내놓으면 신규 서비스, 있던 걸 개선하면 기능 업데이트.
 - "app" 필드: 기사가 앱/웹/디지털 프로덕트의 변화(기능·화면·UX·멤버십몰 등)와 관련되면 true, 아니면 false.
 
 아래 JSON 형식으로만 응답해주세요 (다른 텍스트 없이):
@@ -831,8 +895,8 @@ def enrich_with_ai(article: dict) -> dict:
   "impact_text": "2-3문장, 앱/디지털 사용자에게 어떤 영향이 있는지",
   "why": "2-3문장, 현대카드 앱·웹·M포인트몰 기획 시 참고할 포인트",
   "tags": ["키워드1", "키워드2", "키워드3"],
-  "type": "기능 업데이트|정책 변화|UX 개선",
-  "tc": "t-update|t-policy|t-ux",
+  "type": "신규 서비스|기능 업데이트|정책 변화|제휴·협력|기술·인프라|시장·동향",
+  "tc": "t-new|t-update|t-policy|t-partner|t-tech|t-trend",
   "app": true,
   "imp": 3~5,
   "il": "높음|보통"
@@ -895,14 +959,28 @@ def build_news_item(article: dict, enrichment: dict) -> dict:
     ai_app = enrichment.get("app")
     is_app = bool(ai_app) if ai_app is not None else (app_score >= 3)
 
-    # ★ v6: 태그 일원화 — '신규 기능/신규 서비스'(t-new)를 '기능 업데이트'(t-update)로 통합
-    e_type = enrichment.get("type", "정책 변화")
-    e_tc = enrichment.get("tc", "t-policy")
-    if e_tc == "t-new" or e_type in ("신규 기능", "신규 서비스"):
-        e_type, e_tc = "기능 업데이트", "t-update"
+    # ★ v6: 6종 타입 정규화 (레거시/이상치 보정)
+    #   신규 서비스 / 기능 업데이트 / 정책 변화 / 제휴·협력 / 기술·인프라 / 시장·동향
+    TYPE_MAP = {
+        "신규 서비스": ("신규 서비스", "t-new"),
+        "신규 기능": ("신규 서비스", "t-new"),       # 레거시 → 신규 서비스
+        "기능 업데이트": ("기능 업데이트", "t-update"),
+        "UX 개선": ("기능 업데이트", "t-update"),     # 폐기 → 기능 업데이트로 흡수
+        "정책 변화": ("정책 변화", "t-policy"),
+        "제휴·협력": ("제휴·협력", "t-partner"),
+        "제휴": ("제휴·협력", "t-partner"),
+        "기술·인프라": ("기술·인프라", "t-tech"),
+        "시장·동향": ("시장·동향", "t-trend"),
+        "마케팅 이벤트": ("기능 업데이트", "t-update"),  # 폐기 카테고리 보정
+    }
+    e_type, e_tc = TYPE_MAP.get(enrichment.get("type", ""), ("기능 업데이트", "t-update"))
 
-    # type이 앱 변화 계열이면 앱으로 간주
-    if e_tc in ("t-update", "t-ux") and app_score > 0:
+    # ★ 시장·동향 출처(와이즈앱 등)로 잡힌 기사는 무조건 '시장·동향'으로
+    if brand in TREND_BRANDS:
+        e_type, e_tc = "시장·동향", "t-trend"
+
+    # type이 앱 변화 계열이면 앱으로 간주(우선순위용)
+    if e_tc in ("t-new", "t-update") and app_score > 0:
         is_app = True
 
     return {
@@ -1018,11 +1096,14 @@ def main():
 
     # 7. ★ v4: AI 관련성 검증 (브랜드명 포함하여 교차 검증)
     #    공식 뉴스룸 기사도 동일하게 검증해 인사/실적/IR 보도자료를 걸러냄
+    # ★ v6: 회당 게시 상한 10건 (검증 풀은 더 넉넉히 둠)
+    ADD_PER_RUN = 10
+    VALIDATE_POOL = 25
     validated = []
-    for i, article in enumerate(branded[:15]):
+    for i, article in enumerate(branded[:VALIDATE_POOL]):
         brand, _ = detect_brand(article["title"], article["desc"])
         tag = "공식" if article.get("_official") else "기사"
-        print(f"  [AI검증 {i+1}/{min(len(branded),15)}] [{brand}/{tag}] {article['title'][:32]}...", end="")
+        print(f"  [AI검증 {i+1}/{min(len(branded),VALIDATE_POOL)}] [{brand}/{tag}] {article['title'][:32]}...", end="")
         if ai_validate_article(article, detected_brand=brand):
             validated.append(article)
             print(" -> 통과")
@@ -1030,11 +1111,11 @@ def main():
             print(" -> 제외")
     print(f"\n[7] AI 검증: {len(validated)}건 통과")
 
-    # 8. 상세 분석 생성 (최대 5건만 - 품질 우선)
+    # 8. 상세 분석 생성 (회당 최대 ADD_PER_RUN건 - 품질 우선)
     #    ★ v6: 분석 실패(_ok=False) 기사는 게시하지 않음 → 잘린 원문/placeholder 노출 방지
     new_items = []
-    for i, article in enumerate(validated[:6]):
-        print(f"  [분석 {i+1}/{min(len(validated),6)}] {article['title'][:40]}...")
+    for i, article in enumerate(validated[:ADD_PER_RUN + 4]):
+        print(f"  [분석 {i+1}/{min(len(validated),ADD_PER_RUN+4)}] {article['title'][:40]}...")
         enrichment = enrich_with_ai(article)
 
         if not enrichment.get("_ok"):
@@ -1049,7 +1130,7 @@ def main():
             continue
 
         new_items.append(item)
-        if len(new_items) >= 5:
+        if len(new_items) >= ADD_PER_RUN:
             break
 
     print(f"\n[8] 신규 추가: {len(new_items)}건")
