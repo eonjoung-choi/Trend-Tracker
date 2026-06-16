@@ -22,13 +22,14 @@ body{font-family:'Pretendard Variable',-apple-system,system-ui,sans-serif;backgr
 
 /* ── HEADER ── */
 .hd{background:var(--surface);position:sticky;top:0;z-index:50;border-bottom:1px solid var(--border)}
-.hd-top{display:flex;align-items:center;justify-content:space-between;padding:24px 16px 14px}
-.hd-left{display:flex;flex-direction:column;gap:4px;min-width:0}
+.hd-top{display:flex;align-items:flex-start;justify-content:space-between;padding:22px 16px 14px}
+.hd-left{display:flex;flex-direction:column;gap:9px;min-width:0}
+.hd-title-row{display:flex;align-items:baseline;gap:10px;min-width:0}
 .logo{font-size:28px;font-weight:900;letter-spacing:-1px;color:var(--t1);white-space:nowrap;line-height:1.15}
-.hd-sub{font-size:14.5px;font-weight:600;color:var(--t2);white-space:nowrap}
-.hd-date{font-size:14px;font-weight:600;color:var(--accent);white-space:nowrap}
+.hd-sub{font-size:14.5px;font-weight:600;color:var(--t1);white-space:nowrap}
+.hd-date{font-size:13.5px;font-weight:600;color:var(--accent);white-space:nowrap}
 .hd-right{display:flex;align-items:center;gap:10px;flex-shrink:0}
-.search-btn{width:44px;height:44px;border-radius:50%;border:none;background:var(--accent);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff;transition:.15s;-webkit-tap-highlight-color:transparent;box-shadow:0 2px 8px rgba(49,130,246,.3)}
+.search-btn{width:34px;height:34px;margin-top:2px;border-radius:50%;border:none;background:var(--accent);display:flex;align-items:center;justify-content:center;cursor:pointer;color:#fff;transition:.15s;-webkit-tap-highlight-color:transparent;box-shadow:0 2px 8px rgba(49,130,246,.3)}
 .search-btn:active{background:#1B64DA}
 .search-bar{overflow:hidden;max-height:0;transition:max-height .25s ease,margin .25s ease,opacity .25s ease;opacity:0;margin-top:0;position:relative;padding:0 16px}
 .search-bar.open{max-height:56px;opacity:1;margin-top:10px}
@@ -48,7 +49,7 @@ body{font-family:'Pretendard Variable',-apple-system,system-ui,sans-serif;backgr
 
 /* ── FEED ── */
 .feed{padding:8px 12px 100px}
-.date-label{font-size:13px;font-weight:600;color:var(--t3);padding:20px 4px 10px;position:sticky;top:142px;background:var(--bg);z-index:10}
+.date-label{font-size:13px;font-weight:600;color:var(--t3);padding:20px 4px 10px;position:sticky;top:146px;background:var(--bg);z-index:10}
 .card{background:var(--surface);border-radius:var(--r);padding:20px 18px;margin-bottom:12px;border:1px solid var(--border);cursor:pointer;transition:.15s;-webkit-tap-highlight-color:transparent}
 .card:active{transform:scale(.985);background:#FAFBFC}
 .card-top{display:flex;align-items:center;gap:6px;margin-bottom:12px;flex-wrap:wrap}
@@ -68,10 +69,12 @@ body{font-family:'Pretendard Variable',-apple-system,system-ui,sans-serif;backgr
 /* ── SHEET ── */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:100;opacity:0;pointer-events:none;transition:opacity .2s}
 .overlay.on{opacity:1;pointer-events:auto}
-.sheet{position:fixed;bottom:0;left:0;right:0;z-index:101;background:var(--surface);border-radius:20px 20px 0 0;max-height:92vh;overflow-y:auto;transform:translateY(100%);transition:transform .3s cubic-bezier(.32,.72,0,1);-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding-bottom:env(safe-area-inset-bottom,0)}
+.sheet{position:fixed;bottom:0;left:0;right:0;z-index:101;background:var(--surface);border-radius:20px 20px 0 0;max-height:82vh;display:flex;flex-direction:column;overflow:hidden;transform:translateY(100%);transition:transform .3s cubic-bezier(.32,.72,0,1);overscroll-behavior:contain;padding-bottom:env(safe-area-inset-bottom,0)}
 .sheet.on{transform:translateY(0)}
-.sheet-handle{width:36px;height:4px;background:var(--border);border-radius:2px;margin:10px auto 0}
-.sheet-head{padding:14px 16px 10px;display:flex;align-items:flex-start;gap:10px}
+.sheet-handle{width:36px;height:4px;background:var(--border);border-radius:2px;margin:10px auto 6px;flex-shrink:0}
+.sheet-head{padding:6px 16px 12px;display:flex;align-items:flex-start;gap:10px;flex-shrink:0;border-bottom:1px solid var(--border)}
+.sheet-scroll{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;flex:1}
+#shHead{flex-shrink:0}
 .sheet-head-info{flex:1;min-width:0}
 .sheet-close{width:36px;height:36px;border-radius:50%;background:var(--bg);border:none;font-size:18px;color:var(--t3);cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent}
 .sheet-body{padding:0 16px 32px}
@@ -107,13 +110,15 @@ body{font-family:'Pretendard Variable',-apple-system,system-ui,sans-serif;backgr
 <header class="hd">
   <div class="hd-top">
     <div class="hd-left">
-      <div class="logo" onclick="goHome()" style="cursor:pointer">Trend Tracker</div>
+      <div class="hd-title-row">
+        <div class="logo" onclick="goHome()" style="cursor:pointer">Trend Tracker</div>
+        <span class="hd-date" id="dateLabel"></span>
+      </div>
       <div class="hd-sub">국내외 금융사 동향 트래킹</div>
     </div>
     <div class="hd-right">
-      <span class="hd-date" id="dateLabel"></span>
       <button class="search-btn" onclick="toggleSearch()" aria-label="검색">
-        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
       </button>
     </div>
   </div>
@@ -127,7 +132,7 @@ body{font-family:'Pretendard Variable',-apple-system,system-ui,sans-serif;backgr
 
 <div class="feed" id="feed"></div>
 <div class="overlay" id="ov" onclick="close_sheet()"></div>
-<div class="sheet" id="sh"><div class="sheet-handle"></div><div id="shContent"></div></div>
+<div class="sheet" id="sh"><div class="sheet-handle"></div><div id="shHead"></div><div id="shBody" class="sheet-scroll"></div></div>
 
 <script>
 let D=[];
@@ -190,8 +195,10 @@ function render(){
 
 function open_sheet(id){
   const x=D.find(d=>d.id===id);if(!x)return;
-  document.getElementById('shContent').innerHTML=`
-    <div class="sheet-head"><div class="sheet-head-info"><div class="card-top" style="margin-bottom:10px"><span class="brand ${x.bc}">${x.brand}</span><span class="type ${x.tc}">${x.type}</span></div><div style="font-size:19px;font-weight:700;line-height:1.4">${x.title}</div></div><button class="sheet-close" onclick="close_sheet()">✕</button></div>
+  document.getElementById('shHead').innerHTML=`
+    <div class="sheet-head"><div class="sheet-head-info"><div class="card-top" style="margin-bottom:10px"><span class="brand ${x.bc}">${x.brand}</span><span class="type ${x.tc}">${x.type}</span></div><div style="font-size:19px;font-weight:700;line-height:1.4">${x.title}</div></div><button class="sheet-close" onclick="close_sheet()">✕</button></div>`;
+  document.getElementById('shBody').scrollTop=0;
+  document.getElementById('shBody').innerHTML=`
     <div class="sheet-body">
       <div class="sh-meta">
         <div class="sh-meta-item"><small>발표일</small><strong>${fmtDateFull(x.date)}</strong></div>
@@ -223,7 +230,7 @@ function initApp(){
 
 let touchY=0;
 document.getElementById('sh').addEventListener('touchstart',e=>{touchY=e.touches[0].clientY},{passive:true});
-document.getElementById('sh').addEventListener('touchmove',e=>{if(e.touches[0].clientY-touchY>80&&document.getElementById('sh').scrollTop<=0)close_sheet();},{passive:true});
+document.getElementById('sh').addEventListener('touchmove',e=>{if(e.touches[0].clientY-touchY>80&&document.getElementById('shBody').scrollTop<=0)close_sheet();},{passive:true});
 </script>
 </body>
 </html>
