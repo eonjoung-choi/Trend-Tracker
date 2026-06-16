@@ -53,6 +53,31 @@ def smart_truncate(s: str, limit: int = 150) -> str:
         cut = cut[:sp]
     return cut.strip() + "…"
 
+
+def first_sentence(text: str, max_len: int = 95) -> str:
+    """문장의 첫 문장만 추출(카드용 한 줄 요약). 마침표/물음표/느낌표 기준.
+    너무 길면 smart_truncate로 자연스럽게 자른다."""
+    t = (text or "").strip()
+    if not t:
+        return ""
+    parts = re.split(r"(?<=[.!?])\s", t)
+    s = parts[0].strip() if parts else t
+    if len(s) > max_len:
+        s = smart_truncate(s, max_len)
+    return s
+
+
+def make_summary(enrichment: dict, article: dict) -> str:
+    """카드에 보일 한 줄 요약. AI summary → detail 첫문장 → 원본 desc 순."""
+    s = (enrichment.get("summary") or "").strip()
+    if s:
+        return s
+    s = first_sentence(enrichment.get("detail") or "")
+    if s:
+        return s
+    return article.get("desc", "")
+
+
 # ── 설정 ──
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 NAVER_CLIENT_ID = os.environ.get("NAVER_CLIENT_ID", "")
@@ -76,6 +101,7 @@ KEYWORDS = [
     # 전통금융 (은행) ★ v6
     "KB국민은행", "국민은행", "신한은행", "하나은행", "우리은행",
     "NH농협은행", "농협은행", "IBK기업은행", "기업은행",
+    "BNK부산은행", "BNK경남은행", "BNK금융", "부산은행", "경남은행",
     # 글로벌 결제·핀테크 ★ v6 (해외 탭)
     "비자", "마스터카드", "페이팔", "스트라이프", "알리페이",
     "위챗페이", "클라르나", "레볼루트", "아멕스",
@@ -165,6 +191,11 @@ BRAND_MAP = {
     "농협은행": ("농협은행", "b-nh"),
     "IBK기업은행": ("IBK기업은행", "b-ibk"),
     "기업은행": ("IBK기업은행", "b-ibk"),
+    "BNK부산은행": ("BNK금융", "b-bnk"),
+    "BNK경남은행": ("BNK금융", "b-bnk"),
+    "BNK금융": ("BNK금융", "b-bnk"),
+    "부산은행": ("BNK금융", "b-bnk"),
+    "경남은행": ("BNK금융", "b-bnk"),
 }
 
 # ── 해외(글로벌) 결제·핀테크 브랜드 매핑 ★ v6 — '해외' 탭용 ──
@@ -851,6 +882,7 @@ def _enrich_fallback(article: dict, ok: bool = False) -> dict:
     """
     base = smart_truncate(clean_text(article.get("desc", "")), 180)
     return {
+        "summary": first_sentence(base) or article.get("title", ""),
         "detail": base or article.get("title", ""),
         "impact_text": "",
         "why": "",
@@ -891,6 +923,7 @@ def enrich_with_ai(article: dict) -> dict:
 
 아래 JSON 형식으로만 응답해주세요 (다른 텍스트 없이):
 {{
+  "summary": "1문장(60자 내외, 해요체). 카드 목록에 보일 핵심 한 줄 요약 — 무엇을/누가 했는지 또렷하게",
   "detail": "3-4문장, 해요체로 핵심 내용 설명",
   "impact_text": "2-3문장, 앱/디지털 사용자에게 어떤 영향이 있는지",
   "why": "2-3문장, 현대카드 앱·웹·M포인트몰 기획 시 참고할 포인트",
@@ -987,6 +1020,7 @@ def build_news_item(article: dict, enrichment: dict) -> dict:
         "id": generate_id(article["title"]),
         "title": article["title"],
         "desc": article["desc"],
+        "summary": make_summary(enrichment, article),
         "detail": enrichment.get("detail", article["desc"]),
         "impact_text": enrichment.get("impact_text", ""),
         "why": enrichment.get("why", ""),
