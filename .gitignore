@@ -1,2 +1,4 @@
 .DS_Store
 preview.html
+fix_apps.py
+__pycache__/
