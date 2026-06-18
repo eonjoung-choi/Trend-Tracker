@@ -36,6 +36,18 @@ def clean_text(s: str) -> str:
     return s
 
 
+def clean_title(s: str) -> str:
+    """수집 시 끝이 잘려 들어온 제목 꼬리를 정리.
+    예: "...'페이 재테크' [S머니..." → "...'페이 재테크'"  (잘린 대괄호/말줄임표 제거)
+    """
+    s = clean_text(s)
+    # 끝에 닫히지 않고 말줄임표로 잘린 [코너명…/(…) 조각 제거
+    s = re.sub(r"\s*[\[\(][^\]\)]{0,25}(?:\.{2,}|…)\s*$", "", s)
+    # 남은 말줄임표(…/...) 꼬리 제거
+    s = re.sub(r"\s*(?:\.{2,}|…)\s*$", "", s).strip()
+    return s
+
+
 def smart_truncate(s: str, limit: int = 150) -> str:
     """단어/문장 경계에서 자연스럽게 자르고 '…'을 붙인다.
     desc[:120]처럼 단어 중간에서 끊겨 '…15일 네'가 노출되던 문제를 개선.
@@ -607,7 +619,7 @@ def fetch_rss_news() -> list:
         try:
             feed = feedparser.parse(feed_info["url"])
             for entry in feed.entries[:20]:
-                title = clean_text(entry.get("title", ""))
+                title = clean_title(entry.get("title", ""))
                 desc = clean_text(entry.get("summary", entry.get("description", "")))
                 link = entry.get("link", "")
                 date = parse_date(entry)
@@ -651,7 +663,7 @@ def fetch_newsroom_news() -> list:
         try:
             feed = feedparser.parse(feed_info["url"])
             for entry in feed.entries[:30]:
-                title = clean_text(entry.get("title", ""))
+                title = clean_title(entry.get("title", ""))
                 desc = clean_text(entry.get("summary", entry.get("description", "")))
                 link = entry.get("link", "")
                 date = parse_date(entry)
@@ -711,7 +723,7 @@ def fetch_naver_news() -> list:
 
             items = resp.json().get("items", [])
             for item in items:
-                title = clean_text(item.get("title", ""))
+                title = clean_title(item.get("title", ""))
                 desc = clean_text(item.get("description", ""))
                 link = item.get("originallink") or item.get("link", "")
                 pub_date = item.get("pubDate", "")
