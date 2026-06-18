@@ -85,8 +85,8 @@ NAVER_CLIENT_SECRET = os.environ.get("NAVER_CLIENT_SECRET", "")
 NEWS_DATA_PATH = Path(__file__).parent.parent / "news_data.json"
 MAX_ITEMS = 800  # ★ v6: 보관 상한(안전 ceiling). 실제 보관 기간은 DAYS_TO_KEEP가 결정
 DAYS_TO_KEEP = 180  # ★ v6: 최근 180일(6개월) 보관, 이보다 오래된 비고정 기사는 삭제
-# ★ v4: 최근 14일 이내 기사만 수집 (과거 기사 유입 차단 강화)
-MIN_DATE = (datetime.now() - timedelta(days=14)).strftime("%Y-%m-%d")
+# ★ v6: 최근 21일 이내 기사만 수집 (균형 완화 — 14→21일로 수집창 확대)
+MIN_DATE = (datetime.now() - timedelta(days=21)).strftime("%Y-%m-%d")
 
 # ── 타겟 키워드 (핀테크 / 전통금융 + 글로벌 결제·핀테크) ──
 KEYWORDS = [
@@ -229,9 +229,13 @@ TREND_SOURCES = {
 }
 # 시장·동향 시그널 키워드 (제목 기준, 1개만 있어도 판세 기사로 간주)
 TREND_KEYWORDS = [
+    # 정량 통계
     "MAU", "월간 활성", "활성 사용자 수", "시장 규모", "시장 점유율", "점유율",
     "이용 규모", "이용 현황", "거래액", "4강 구도", "3강 구도", "양강 구도",
     "과점", "판도", "전자지급", "사용자 순위", "앱 순위", "이용자 순위",
+    # ★ v6 균형완화: 업계 판세·전략·소비 트렌드 분석형 기사도 포함
+    "경쟁 심화", "플랫폼 경쟁", "각축", "지각변동", "돌파구", "수익성 악화",
+    "업계 동향", "트렌드 부상", "페이 재테크", "소비 트렌드",
 ]
 # 시장·동향으로 강제 분류할 브랜드 표시명 집합
 TREND_BRANDS = {v[0] for v in TREND_SOURCES.values()} | {"시장 동향"}
@@ -416,7 +420,8 @@ EXCLUDE_KEYWORDS = [
     "상장", "기업공개", "투자 유치", "벤처캐피탈",
 
     # === 기타 비관련 ===
-    "자동차", "부동산", "아파트", "재건축", "분양",
+    # ★ v6 균형완화: '부동산' 제외 (마이데이터 부동산청약 등 정상 서비스가 걸리던 문제) — 아파트/재건축/분양은 유지
+    "자동차", "아파트", "재건축", "분양",
     "의료", "병원", "제약", "바이오",
     "AI 반도체", "AI 칩", "데이터센터",
 ]
@@ -726,17 +731,15 @@ def fetch_naver_news() -> list:
                     print(f"    [노이즈] {title[:30]}...")
                     continue
 
-                # ★ v4: 검색 쿼리의 expect_brand가 제목에 있는지 확인 (국내+해외 맵 모두 조회)
+                # ★ v6 균형완화: 기대 브랜드 '정확히'가 아니라, 제목에 타겟 브랜드(국내·해외·분석사)가
+                #   하나라도 있으면 통과시킨다. (단일 브랜드 여부는 이후 detect_brand가 다시 검증)
                 expect_brand = qinfo.get("expect_brand", "")
                 if expect_brand:
-                    brand_in_title = False
-                    for kw, (bn, _) in {**BRAND_MAP, **FOREIGN_BRAND_MAP, **TREND_SOURCES}.items():
-                        if bn == expect_brand or kw == expect_brand:
-                            if kw in title:
-                                brand_in_title = True
-                                break
-                    if not brand_in_title:
-                        print(f"    [브랜드불일치] 기대={expect_brand}, 제목={title[:40]}...")
+                    all_keys = list(BRAND_MAP.keys()) + list(FOREIGN_BRAND_MAP.keys()) + list(TREND_SOURCES.keys())
+                    has_brand = any(kw in title for kw in all_keys)
+                    is_trend = detect_trend(title, desc)[0] is not None  # 업계 동향형도 통과
+                    if not (has_brand or is_trend):
+                        print(f"    [타겟브랜드없음] 제목={title[:40]}...")
                         continue
 
                 articles.append({
@@ -771,7 +774,7 @@ def ai_validate_article(article: dict, detected_brand: str = None) -> bool:
     if detected_brand:
         brand_context = f"\n감지된 브랜드: {detected_brand}"
 
-    prompt = f"""당신은 "금융/핀테크 트렌드 트래커" 편집자입니다(국내 카드·은행·간편결제 + 글로벌 결제·핀테크 기업 Visa·Mastercard·PayPal·Stripe·Alipay 등 포함). 아래 기사가 게시 기준에 부합하는지 엄격하게 판단하세요.
+    prompt = f"""당신은 "금융/핀테크 트렌드 트래커" 편집자입니다(국내 카드·은행·간편결제 + 글로벌 결제·핀테크 기업 Visa·Mastercard·PayPal·Stripe·Alipay 등 포함). 아래 기사가 게시 기준에 부합하는지 판단하세요. 기본 태도는 '명백한 노이즈만 걸러내고, 특정 브랜드의 실제 변화면 통과'입니다.
 
 제목: {article['title']}
 요약: {article['desc']}{brand_context}
@@ -780,10 +783,10 @@ def ai_validate_article(article: dict, detected_brand: str = None) -> bool:
 1. 기사의 주인공(subject)이 반드시 위 '감지된 브랜드'의 서비스여야 함
    - 해당 브랜드가 단순히 언급/비교되는 것은 "no"
    - 다른 기업이 주어이고 감지된 브랜드는 배경으로만 등장하면 "no"
-2. 기사 내용이 해당 브랜드의 서비스 변화(신기능/업데이트/개편/전략적 캠페인)에 관한 것이어야 함
-   - 단순 기업 소식(인사/실적/채용/IR)은 "no"
-   - 업계 전반 동향이나 여러 기업 나열형 기사는 "no"
-3. 기사 날짜가 최근 2주 이내여야 하고, 과거 이벤트의 재탕 기사가 아니어야 함
+2. 기사 내용이 해당 브랜드의 서비스 변화에 관한 것 — 신규 카드·포인트·멤버십·금융상품·앱 기능의 출시·추가·개편·정책 변경은 모두 "yes" 대상
+   - 단순 기업 소식(인사/실적/채용/IR)만 "no"
+   - (단, 아래 '시장·동향' 예외에 해당하면 여러 기업이 등장해도 "yes")
+3. 기사 날짜가 최근 3주 이내여야 하고, 과거 이벤트의 재탕 기사가 아니어야 함
 
 [무조건 "no"인 경우]:
 - 트럼프/관세/무역/정치/외교/시사 (핀테크 언급이 곁들여져도 no)
@@ -800,15 +803,16 @@ def ai_validate_article(article: dict, detected_brand: str = None) -> bool:
 - 기사 제목에 브랜드명이 있으나 실제로는 다른 주제인 기사
 - 단순히 2개 브랜드를 비교·나열만 하는 기사
 
-[예외 — '시장·동향'으로 "yes" 가능]
-- 와이즈앱·모바일인덱스·닐슨·한국은행·여신금융협회 등 공신력 있는 기관·분석사가 발표한
-  '간편결제/카드/금융 앱'의 시장 규모·점유율·MAU·이용 통계 등 정량 판세 리포트는 여러 기업이 등장해도 "yes".
-  (단, 근거 없는 전망·의견 칼럼이나 단순 순위 나열성 홍보는 "no")
+[예외 — '시장·동향'으로 "yes" 가능 (여러 기업이 등장해도 OK)]
+- (a) 와이즈앱·모바일인덱스·닐슨·한국은행·여신금융협회 등 분석사·기관의 시장 규모·점유율·MAU·이용 통계 등 정량 리포트
+- (b) 금융·결제·카드·핀테크 업계의 의미 있는 판세·전략 흐름을 짚는 동향 기사
+      (예: '플랫폼 경쟁 심화', '수익성 악화 속 ○○로 돌파구', '○○ 트렌드 부상', '페이 재테크' 등 업계 흐름·소비 트렌드 분석)
+- 단, 단순 할인·쿠폰 홍보, 특정 상품 광고성 기사, 맥락 없는 단신 나열은 "no"
 
-[수집 대상 = 국내 카드·은행·간편결제 + 글로벌 결제·핀테크의 '서비스·정책 변화', 그리고 위 '시장·동향' 리포트]
-- 결제/송금/인증/금융상품/앱 기능의 출시·개편·정책 변경, 또는 공신력 있는 시장·동향 통계에 해당해야 "yes"
+[수집 대상 = 국내 카드·은행·간편결제 + 글로벌 결제·핀테크의 '서비스·정책 변화', 그리고 위 '시장·동향' 기사]
+- 결제/송금/인증/금융상품/앱 기능의 출시·개편·정책 변경, 또는 위 '시장·동향'(통계+업계 흐름)에 해당하면 "yes"
 
-의심스러우면 반드시 "no"를 선택하세요. 확실한 경우에만 "yes"입니다.
+명백한 노이즈·무관 기사만 "no"로 거르세요. 특정 브랜드의 실제 변화이거나 위 '시장·동향' 예외에 해당하면, 애매하더라도 "yes"로 통과시키세요.
 "yes" 또는 "no"만 답해주세요."""
 
     try:
