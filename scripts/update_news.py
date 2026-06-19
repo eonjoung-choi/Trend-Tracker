@@ -45,7 +45,48 @@ def clean_title(s: str) -> str:
     s = re.sub(r"\s*[\[\(][^\]\)]{0,25}(?:\.{2,}|…)\s*$", "", s)
     # 남은 말줄임표(…/...) 꼬리 제거
     s = re.sub(r"\s*(?:\.{2,}|…)\s*$", "", s).strip()
+    # 단어 중간에서 잘린 끝(공백 뒤 1글자 한글, 종결부호 없음) → 잘린 조각 떼고 '…' 부착
+    #   예) "...정산까지 디지털 인" → "...정산까지 디지털…"  (소스가 자른 'ㅍ프라 구축'은 복원 불가)
+    m = re.search(r"\s[가-힣]$", s)
+    if m and len(s) > 15 and not re.search(r"[.!?\"'’”」』)\]]$", s):
+        s = s[:m.start()].rstrip() + "…"
     return s
+
+
+def _extract_og_title(htmltext: str) -> str:
+    """HTML에서 og:title(없으면 <title>) 추출 + 언론사명 꼬리 제거."""
+    cand = ""
+    for pat in (r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\']([^"\']+)["\']',
+                r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:title["\']',
+                r"<title[^>]*>([^<]+)</title>"):
+        mm = re.search(pat, htmltext, re.I | re.S)
+        if mm:
+            cand = html.unescape(mm.group(1))
+            break
+    cand = re.sub(r"\s+", " ", cand).strip()
+    # ' - 전자신문', ' | ZDNet', ' :: 매체' 같은 매체명 꼬리 제거
+    cand = re.sub(r"\s*[\|\-–—:]{1,2}\s*[^|\-–—:]{1,15}$", "", cand).strip()
+    return cand
+
+
+def recover_full_title(title: str, url: str) -> str:
+    """제목이 잘린 경우(끝이 …)만 원문 페이지 og:title로 전체 제목 복원 시도.
+    수집(GitHub Actions)·로컬에서 실행되며, 실패하면 기존 title을 그대로 유지한다.
+    """
+    if not url or not title.endswith("…"):
+        return title
+    try:
+        r = requests.get(url, timeout=8, allow_redirects=True,
+                         headers={"User-Agent": "Mozilla/5.0 (compatible; TrendTrackerBot/1.0)"})
+        if r.status_code != 200 or not r.text:
+            return title
+        cand = _extract_og_title(r.text)
+        # 복원본이 잘린 제목보다 길고(=더 많은 내용) 합리적 길이면 채택
+        if cand and len(cand) > len(title.rstrip("…")) and len(cand) <= 120:
+            return cand
+    except Exception as e:
+        print(f"    [제목복원 실패] {e}")
+    return title
 
 
 def smart_truncate(s: str, limit: int = 150) -> str:
@@ -1058,9 +1099,12 @@ def build_news_item(article: dict, enrichment: dict) -> dict:
     if e_tc in ("t-new", "t-update") and app_score > 0:
         is_app = True
 
+    # ★ v6.1: 잘린 제목(…)이면 원문 og:title로 전체 제목 복원 (게시 대상에만 적용 → 호출 최소)
+    full_title = recover_full_title(article["title"], article.get("url", ""))
+
     return {
         "id": generate_id(article["title"]),
-        "title": article["title"],
+        "title": full_title,
         "desc": article["desc"],
         "summary": make_summary(enrichment, article),
         "detail": enrichment.get("detail", article["desc"]),
