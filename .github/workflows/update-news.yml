@@ -1,10 +1,14 @@
 name: 📰 뉴스 자동 업데이트
 
 on:
+  # ★ 외부 스케줄러(cron-job.org 등)가 정시에 트리거 — repository_dispatch
+  #   POST https://api.github.com/repos/<owner>/<repo>/dispatches  body: {"event_type":"run-news"}
+  repository_dispatch:
+    types: [run-news]
   schedule:
-    # 매일 오전 8시 17분 KST (한국시간) = UTC 23:17 (전날)
-    # ★ 정각(:00)은 GitHub 크론이 몰려 지연·누락이 잦아 비혼잡 시간(:17)으로 조정
-    - cron: '17 23 * * *'
+    # 백업용 — 외부 스케줄러 실패 대비 (GitHub 크론은 지연될 수 있음)
+    # 매일 오전 6시 8분 KST = UTC 21:08 (전날)
+    - cron: '8 21 * * *'
   workflow_dispatch:  # 수동 실행 가능
 
 permissions:
