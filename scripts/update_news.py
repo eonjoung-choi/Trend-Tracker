@@ -194,12 +194,17 @@ NAVER_SEARCH_QUERIES = [
     {"q": "우리은행 앱 개편", "type": "service", "expect_brand": "우리은행"},
     {"q": "IBK기업은행 앱 서비스", "type": "service", "expect_brand": "IBK기업은행"},
     {"q": "NH농협은행 앱 서비스", "type": "service", "expect_brand": "NH농협은행"},
-    # ── 글로벌 결제·핀테크 ★ v6 (해외 탭) ──
-    {"q": "비자 결제 서비스", "type": "service", "expect_brand": "비자"},
-    {"q": "마스터카드 결제", "type": "service", "expect_brand": "마스터카드"},
-    {"q": "페이팔 서비스", "type": "service", "expect_brand": "페이팔"},
-    {"q": "스트라이프 결제", "type": "service", "expect_brand": "스트라이프"},
-    {"q": "알리페이 서비스", "type": "service", "expect_brand": "알리페이"},
+    # ── 글로벌 결제·핀테크 ★ v6 (해외 탭) — ★ v7: 쿼리 확대 + display 상향(신선도 확보) ──
+    {"q": "비자 결제", "type": "service", "expect_brand": "비자", "display": 5},
+    {"q": "비자 디지털 결제", "type": "service", "expect_brand": "비자", "display": 5},
+    {"q": "마스터카드 결제", "type": "service", "expect_brand": "마스터카드", "display": 5},
+    {"q": "마스터카드 핀테크", "type": "service", "expect_brand": "마스터카드", "display": 5},
+    {"q": "페이팔 서비스", "type": "service", "expect_brand": "페이팔", "display": 5},
+    {"q": "스트라이프 결제", "type": "service", "expect_brand": "스트라이프", "display": 5},
+    {"q": "알리페이 서비스", "type": "service", "expect_brand": "알리페이", "display": 5},
+    {"q": "위챗페이 결제", "type": "service", "expect_brand": "위챗페이", "display": 5},
+    {"q": "아메리칸 익스프레스 카드", "type": "service", "expect_brand": "아멕스", "display": 5},
+    {"q": "레볼루트 핀테크", "type": "service", "expect_brand": "레볼루트", "display": 5},
     # ── 일반 서비스 변화 (앱 외 정책/신상품도 보조 수집) ──
     {"q": "현대카드 서비스 출시", "type": "service", "expect_brand": "현대카드"},
     {"q": "신한카드 서비스", "type": "service", "expect_brand": "신한카드"},
@@ -629,6 +634,38 @@ def region_of(brand: str) -> str:
     return "해외" if brand in FOREIGN_BRANDS else "국내"
 
 
+# 국내 기업/그룹 식별 토큰 — 제목 주어가 이들 중 하나이면, 해외 브랜드가 함께 언급돼도
+# '국내 기업의 소식(제휴 등)'이므로 국내로 분류한다. (BRAND_MAP에 없는 기업까지 포괄)
+DOMESTIC_GROUPS = {
+    "롯데", "신한", "KB", "국민", "하나", "우리", "농협", "NH", "기업은행", "IBK",
+    "수협", "새마을", "부산은행", "대구은행", "경남은행", "광주은행", "전북은행",
+    "BNK", "DGB", "JB", "삼성", "현대", "카카오", "네이버", "토스", "케이뱅크",
+    "페이코", "비씨", "BC카드", "우체국", "코나아이", "다날", "세틀뱅크", "헥토",
+    "11번가", "SSG", "쿠팡", "위메프", "티몬", "배달의민족", "배민", "컬리", "무신사",
+    "야놀자", "당근", "SK", "SKT", "LG", "KT", "CJ", "GS", "한화", "교보",
+    "미래에셋", "키움", "우리카드", "하나카드", "롯데카드", "비씨카드", "핀크", "뱅크샐러드",
+}
+
+
+def region_for_article(title: str, brand: str) -> str:
+    """국내/해외 판정. 단, 해외 브랜드로 잡혔더라도 제목 '주어'가 국내 기업이면
+    (예: '롯데멤버스, 마스터카드와 손잡고…') 국내 기업의 소식이므로 국내로 본다."""
+    base = region_of(brand)
+    if base != "해외":
+        return base
+    # 이 브랜드에 해당하는 해외 키워드의 최초 등장 위치
+    fpos = min((title.find(kw) for kw, (b, _) in FOREIGN_BRAND_MAP.items()
+                if b == brand and kw in title), default=-1)
+    if fpos < 0:
+        return base
+    # 국내 기업명이 해외 브랜드보다 '앞'(주어 위치)에 있으면 국내
+    for g in DOMESTIC_GROUPS:
+        gpos = title.find(g)
+        if 0 <= gpos < fpos:
+            return "국내"
+    return base
+
+
 def detect_sector(title: str, desc: str) -> str:
     """기사 내용에서 업권 감지"""
     text = title + " " + desc
@@ -775,7 +812,8 @@ def fetch_naver_news() -> list:
         query = qinfo["q"]
         qtype = qinfo["type"]
         try:
-            url = f"https://openapi.naver.com/v1/search/news.json?query={quote(query)}&display=3&sort=date"
+            disp = qinfo.get("display", 3)  # ★ v7: 해외 등 일부 쿼리는 더 넓게(신선도 확보)
+            url = f"https://openapi.naver.com/v1/search/news.json?query={quote(query)}&display={disp}&sort=date"
             resp = requests.get(url, headers=headers, timeout=10)
             if resp.status_code != 200:
                 print(f"  [Naver] 검색 실패 [{query}]: {resp.status_code}")
@@ -1138,7 +1176,7 @@ def build_news_item(article: dict, enrichment: dict) -> dict:
         "brand": brand,
         "bc": bc,
         "sector": sector,
-        "region": region_of(brand),
+        "region": region_for_article(article["title"], brand),
         "type": e_type,
         "tc": e_tc,
         "tags": tags[:3],
@@ -1239,46 +1277,66 @@ def main():
     app_cnt = sum(1 for a in branded if app_relevance(a["title"], a["desc"]) > 0)
     print(f"    └ 앱 관점 우선정렬 적용 (앱 관련 후보 {app_cnt}건 상단 배치)")
 
+    # ★ v7: region 분리 — 해외 기사는 앱점수가 낮아 매번 국내에 밀려 갱신이 안 되던 문제를
+    #        해소하기 위해, 국내/해외 후보를 분리하고 해외에 별도 게시 쿼터를 보장한다.
+    def _region_of(a):
+        b, _ = detect_brand(a["title"], a["desc"])
+        return region_for_article(a["title"], b) if b else "국내"
+    branded_foreign = [a for a in branded if _region_of(a) == "해외"]
+    branded_dom = [a for a in branded if _region_of(a) != "해외"]
+    print(f"    └ 후보 분리: 국내 {len(branded_dom)}건 / 해외 {len(branded_foreign)}건")
+
     # 7. ★ v4: AI 관련성 검증 (브랜드명 포함하여 교차 검증)
     #    공식 뉴스룸 기사도 동일하게 검증해 인사/실적/IR 보도자료를 걸러냄
-    # ★ v6: 회당 게시 상한 10건 (검증 풀은 더 넉넉히 둠)
+    # ★ v6: 회당 게시 상한 10건
+    # ★ v7: 국내/해외를 '검증 단계에서만' 분리해, 해외가 점수에 밀려 검증조차 못 받던
+    #        문제를 해소. 단 게시 쿼터는 강제하지 않음 — 검증 통과한 것만 자연 경쟁.
     ADD_PER_RUN = 10
-    VALIDATE_POOL = 25
-    validated = []
-    for i, article in enumerate(branded[:VALIDATE_POOL]):
-        brand, _ = detect_brand(article["title"], article["desc"])
-        tag = "공식" if article.get("_official") else "기사"
-        print(f"  [AI검증 {i+1}/{min(len(branded),VALIDATE_POOL)}] [{brand}/{tag}] {article['title'][:32]}...", end="")
-        if ai_validate_article(article, detected_brand=brand):
-            validated.append(article)
-            print(" -> 통과")
-        else:
-            print(" -> 제외")
-    print(f"\n[7] AI 검증: {len(validated)}건 통과")
+    VALIDATE_POOL = 25       # 국내 검증 풀
+    FOREIGN_POOL = 12        # 해외 검증 풀(검증 기회만 별도 보장)
 
-    # 8. 상세 분석 생성 (회당 최대 ADD_PER_RUN건 - 품질 우선)
+    def _validate(lst, label):
+        out = []
+        for i, art in enumerate(lst):
+            brand, _ = detect_brand(art["title"], art["desc"])
+            tag = "공식" if art.get("_official") else "기사"
+            print(f"  [AI검증·{label} {i+1}/{len(lst)}] [{brand}/{tag}] {art['title'][:30]}...", end="")
+            if ai_validate_article(art, detected_brand=brand):
+                out.append(art); print(" -> 통과")
+            else:
+                print(" -> 제외")
+        return out
+
+    validated_foreign = _validate(branded_foreign[:FOREIGN_POOL], "해외")
+    validated_dom = _validate(branded_dom[:VALIDATE_POOL], "국내")
+    # 검증 통과분을 합쳐 '관련성 검증을 이미 통과한' 후보끼리 최신순으로 자연 경쟁(강제 쿼터 없음)
+    validated = validated_foreign + validated_dom
+    validated.sort(key=lambda a: a.get("date", ""), reverse=True)
+    print(f"\n[7] AI 검증: 국내 {len(validated_dom)}건 / 해외 {len(validated_foreign)}건 통과")
+
+    # 8. 상세 분석 생성 (회당 최대 ADD_PER_RUN건) — 검증 통과분을 최신순으로 추가
     #    ★ v6: 분석 실패(_ok=False) 기사는 게시하지 않음 → 잘린 원문/placeholder 노출 방지
     new_items = []
-    for i, article in enumerate(validated[:ADD_PER_RUN + 4]):
-        print(f"  [분석 {i+1}/{min(len(validated),ADD_PER_RUN+4)}] {article['title'][:40]}...")
-        enrichment = enrich_with_ai(article)
-
-        if not enrichment.get("_ok"):
-            print(f"    -> AI 분석 미완성(상세/영향/포인트 누락), 게시 제외")
+    used = set()
+    for article in validated:
+        if len(new_items) >= ADD_PER_RUN:
+            break
+        if article["title"] in used:
             continue
-
+        used.add(article["title"])
+        print(f"  [분석] {article['title'][:40]}...")
+        enrichment = enrich_with_ai(article)
+        if not enrichment.get("_ok"):
+            print(f"    -> AI 분석 미완성, 게시 제외")
+            continue
         item = build_news_item(article, enrichment)
-
-        # ★ 최종 안전장치: brand가 None이면 절대 추가하지 않음
         if item["brand"] is None:
             print(f"    -> 브랜드 없음, 최종 제외")
             continue
-
         new_items.append(item)
-        if len(new_items) >= ADD_PER_RUN:
-            break
 
-    print(f"\n[8] 신규 추가: {len(new_items)}건")
+    f_total = sum(1 for it in new_items if it.get("region") == "해외")
+    print(f"\n[8] 신규 추가: {len(new_items)}건 (해외 {f_total}건 포함)")
 
     # 9. 병합: 큐레이션 기사 우선 보호
     auto_items = new_items + non_curated
