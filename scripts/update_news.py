@@ -578,6 +578,39 @@ def is_duplicate_article(title_a: str, title_b: str) -> bool:
     return False
 
 
+# ── ★ v7: 동일 사건 감지 (제목이 서로 달라도 '같은 사건'이면 1건만) ──
+# 제목+요약에서 '데이터셋 전체에 드물게 등장하는 고유어(희소어)'를 3개 이상 공유하면 같은 사건으로 본다.
+# (예: 하나은행 스미싱 기사 3건 → '스미싱'·'하나원큐'·'KISA' 공유. 일반어 '결제·앱·금융'은 흔해서 제외됨)
+_EVENT_STOP = {
+    "서비스", "출시", "출시해요", "도입", "기능", "업데이트", "확대", "개편", "론칭",
+    "국내", "최초", "최초로", "올해", "이번", "진행", "발표", "시작", "예정", "고객",
+    "이용", "통해", "위해", "제공", "지원", "운영", "강화", "중심", "다양한", "기반",
+    "플랫폼", "경쟁", "전략",
+}
+
+
+def _event_tokens(title: str, summary: str = "") -> set:
+    txt = f"{title} {summary}"
+    return set(_strip_josa(w) for w in re.findall(r"[가-힣A-Za-z]{2,}", txt)) - _EVENT_STOP
+
+
+def build_token_df(items: list) -> dict:
+    """전체 기사에서 각 토큰의 등장 문서수(df) 집계 — 희소어 판정용."""
+    df = {}
+    for it in items:
+        for t in _event_tokens(it.get("title", ""), it.get("summary", "")):
+            df[t] = df.get(t, 0) + 1
+    return df
+
+
+def is_same_event(a: dict, b: dict, df: dict, min_distinct: int = 3, max_df: int = 3) -> bool:
+    """제목이 달라도 희소어(df<=max_df)를 min_distinct개 이상 공유하면 같은 사건."""
+    sa = _event_tokens(a.get("title", ""), a.get("summary", ""))
+    sb = _event_tokens(b.get("title", ""), b.get("summary", ""))
+    distinct = [t for t in (sa & sb) if df.get(t, 0) <= max_df]
+    return len(distinct) >= min_distinct
+
+
 def detect_brand(title: str, desc: str) -> tuple:
     """★ v4: 제목(title) 전용 브랜드 매칭. 본문(desc) 매칭 완전 제거.
 
@@ -1334,6 +1367,21 @@ def main():
             print(f"    -> 브랜드 없음, 최종 제외")
             continue
         new_items.append(item)
+
+    # ★ v7: 동일 사건 추가 제거 — 제목이 달라도 같은 사건(요약 희소어 3개+ 공유)이면 1건만 남김
+    #         (예: '하나은행·KISA 업무협약' / '스미싱 문자 판별' / '스미싱 예방 1위' → 1건)
+    df_evt = build_token_df(existing + new_items)
+    deduped, ev_drop = [], 0
+    for it in new_items:
+        if any(is_same_event(it, ex, df_evt) for ex in existing) or \
+           any(is_same_event(it, k, df_evt) for k in deduped):
+            print(f"    -> 동일 사건 중복 제거: {it['title'][:36]}")
+            ev_drop += 1
+            continue
+        deduped.append(it)
+    new_items = deduped
+    if ev_drop:
+        print(f"    └ 동일 사건 중복 {ev_drop}건 제거")
 
     f_total = sum(1 for it in new_items if it.get("region") == "해외")
     print(f"\n[8] 신규 추가: {len(new_items)}건 (해외 {f_total}건 포함)")
