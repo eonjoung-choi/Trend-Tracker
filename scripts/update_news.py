@@ -954,15 +954,15 @@ def ai_validate_article(article: dict, detected_brand: str = None) -> bool:
       (예: '플랫폼 경쟁 심화', '수익성 악화 속 ○○로 돌파구', '○○ 트렌드 부상', '페이 재테크' 등 업계 흐름·소비 트렌드 분석)
 - 단, 단순 할인·쿠폰 홍보, 특정 상품 광고성 기사, 맥락 없는 단신 나열은 "no"
 
-[★ 앱/디지털 접점 요건 — 특정 브랜드의 '상품·서비스' 기사에 적용]
-- 우리는 '앱/디지털 프로덕트' 트렌드 트래커입니다. 특정 브랜드 기사는 '앱·디지털 경험 자체의 변화'가 기사 핵심일 때만 "yes".
-  (예: 앱 신규 기능·개편·리뉴얼, UI/UX 변경, 새 인증·결제 수단, 앱 전용 디지털 서비스 출시, 멤버십·포인트 체계 개편 등)
-- ★★ 단순 금융상품(대출·중금리대출·예금·적금·금리·보험·카드상품 등)의 출시·홍보 기사는,
-  설령 '비대면 전용'·'앱에서 신청 가능'·'앱 내 한도조회'라고 적혀 있어도 무조건 "no".
-  → '비대면/앱 신청 가능'은 단순 판매 채널 언급일 뿐, 앱·디지털 경험의 '변화'가 아닙니다.
-  → 기사 핵심이 상품 그 자체(금리·한도·대상·규모)면 "no". (예: "OO은행, 2조원 규모 비대면 중금리대출 출시" → "no")
-  → 단, 기사 핵심이 '그 상품을 위해 앱에 새 기능·화면·프로세스를 도입/개편했다'는 디지털 변화일 때만 "yes".
-- 이 요건은 '시장·동향'·'제휴·협력'·'기술·인프라' 기사에는 적용하지 않음(업계 흐름·기술은 통과).
+[★ '순수 금융상품' 단순 출시 기사만 제외 — 아래 좁은 범위에만 적용]
+- 대출·중금리대출·예금·적금·금리·보험 등 '순수 금융상품'의 출시·홍보가 기사 핵심이고,
+  내용이 금리·한도·대상·규모 위주면 "no".
+  → '비대면 전용'·'앱에서 신청 가능'이라고 적혀 있어도 단순 판매 채널 언급이면 "no".
+  → 예: "OO은행, 2조원 규모 비대면 중금리대출 출시" → "no"
+  → 단, '그 상품을 위해 앱에 새 기능·화면·프로세스를 도입/개편했다'가 핵심이면 "yes".
+- ★★ 이 제외 규칙은 위 '순수 금융상품(대출·예금·적금·금리·보험)'에만 적용합니다.
+  카드 상품 출시, 멤버십·포인트 개편, 결제·인증 수단, 앱 기능·UX 변경, 제휴·협력,
+  정책 변화, 기술·인프라, 시장·동향 기사에는 적용하지 말고 종전대로 "yes"로 통과시키세요.
 
 [수집 대상 = 국내 카드·은행·간편결제 + 글로벌 결제·핀테크의 '서비스·정책 변화', 그리고 위 '시장·동향' 기사]
 - 결제/송금/인증/앱 기능·디지털 상품의 출시·개편·정책 변경, 또는 위 '시장·동향'(통계+업계 흐름)에 해당하면 "yes"
@@ -1286,9 +1286,15 @@ def main():
             raw_articles.append(a)
 
     # 5. ★ v4: 기존 뉴스와 중복 제거 (강화된 비교)
+    # ★ v7: 비교 대상을 '최근 30일 기사'로 제한.
+    #        보관 기간이 6개월이라 과거 기사 전체와 비교하면, 오래된 기사와 명사 몇 개가
+    #        우연히 겹쳐 새 기사가 잘못 탈락하는 일이 늘어난다(수집량 급감 원인).
+    dup_cutoff = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+    recent_existing = [ex for ex in existing if ex.get("date", "") >= dup_cutoff]
+    print(f"  [중복비교 대상] 최근 30일 기존 기사 {len(recent_existing)}건 (전체 {len(existing)}건 중)")
     new_articles = []
     for a in raw_articles:
-        is_dup = any(is_duplicate_article(a["title"], ex["title"]) for ex in existing)
+        is_dup = any(is_duplicate_article(a["title"], ex["title"]) for ex in recent_existing)
         if not is_dup:
             new_articles.append(a)
         else:
@@ -1373,7 +1379,7 @@ def main():
     df_evt = build_token_df(existing + new_items)
     deduped, ev_drop = [], 0
     for it in new_items:
-        if any(is_same_event(it, ex, df_evt) for ex in existing) or \
+        if any(is_same_event(it, ex, df_evt) for ex in recent_existing) or \
            any(is_same_event(it, k, df_evt) for k in deduped):
             print(f"    -> 동일 사건 중복 제거: {it['title'][:36]}")
             ev_drop += 1
