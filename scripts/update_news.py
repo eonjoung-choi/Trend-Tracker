@@ -1216,6 +1216,7 @@ def build_news_item(article: dict, enrichment: dict) -> dict:
         "imp": enrichment.get("imp", 3),
         "il": enrichment.get("il", "보통"),
         "date": article["date"],
+        "added": kst_today(),   # ★ v7: 수집일(KST) — 탭의 '오늘 신규' 배지 집계용
         "isEvent": False,
         "official": bool(article.get("_official")),
         "app": is_app,
@@ -1234,6 +1235,11 @@ def load_existing() -> list:
             if isinstance(data, dict) and "items" in data:
                 return data["items"]
     return []
+
+
+def kst_today() -> str:
+    """수집일(한국시간 기준 YYYY-MM-DD). GitHub Actions 러너는 UTC이므로 +9h."""
+    return (datetime.utcnow() + timedelta(hours=9)).strftime("%Y-%m-%d")
 
 
 def save_data(items: list):

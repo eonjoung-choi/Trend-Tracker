@@ -46,6 +46,9 @@ body{font-family:'Pretendard Variable',-apple-system,system-ui,sans-serif;backgr
 .tab-btn.on{color:var(--accent);border-bottom-color:var(--accent);font-weight:700}
 .tab-btn .cnt{font-size:12px;font-weight:600;margin-left:5px;padding:1px 7px;border-radius:100px;background:var(--bg);color:var(--t3)}
 .tab-btn.on .cnt{background:var(--accent-bg);color:var(--accent)}
+.tab-btn .cnt.dot,.tab-btn.on .cnt.dot{background:var(--accent);color:#fff;font-size:11px;font-weight:700;min-width:17px;height:17px;padding:0 5px;margin-left:6px;border-radius:100px;display:inline-flex;align-items:center;justify-content:center;vertical-align:middle}
+.info-dot{flex:0 0 auto;align-self:center;margin-left:auto;width:24px;height:24px;border:none;background:none;color:var(--t3);font-size:15px;cursor:pointer;line-height:1}
+.cnt-help{padding:9px 16px;font-size:12.5px;color:var(--t3);background:var(--accent-bg);border-bottom:1px solid var(--border);line-height:1.45}
 
 /* ── FEED ── */
 .feed{padding:8px 12px 100px}
@@ -128,6 +131,7 @@ body{font-family:'Pretendard Variable',-apple-system,system-ui,sans-serif;backgr
     <button class="search-clear" id="searchClear" onclick="clearSearch()" aria-label="검색어 삭제">✕</button>
   </div>
   <div class="tab-bar" id="tabBar"></div>
+  <div id="cntHelp" class="cnt-help" hidden>ⓘ 숫자는 <b>오늘 새로 수집된 뉴스 수</b>예요 · 기사 발행일이 아닌 '수집일' 기준</div>
 </header>
 
 <div class="feed" id="feed"></div>
@@ -160,6 +164,8 @@ function fmtRelative(ds){const d=new Date(ds+'T00:00:00+09:00'),now=new Date(),k
 function dateGroup(ds){const d=new Date(ds+'T00:00:00+09:00'),now=new Date(),kst=new Date(now.toLocaleString('en-US',{timeZone:'Asia/Seoul'})),diff=Math.floor((new Date(kst.getFullYear(),kst.getMonth(),kst.getDate())-new Date(d.getFullYear(),d.getMonth(),d.getDate()))/864e5);if(diff===0)return"오늘";if(diff===1)return"어제";if(diff<7)return"이번 주";if(diff<14)return"지난 주";return`${d.getMonth()+1}월`}
 
 function regionOf(x){return x.region||"국내";}
+function todayKST(){const k=new Date(new Date().toLocaleString('en-US',{timeZone:'Asia/Seoul'}));return`${k.getFullYear()}-${String(k.getMonth()+1).padStart(2,'0')}-${String(k.getDate()).padStart(2,'0')}`;}
+function toggleCntHelp(e){e.stopPropagation();const el=document.getElementById('cntHelp');el.hidden=!el.hidden;}
 
 function getFiltered(){
   const q=document.getElementById('q').value.toLowerCase();
@@ -176,10 +182,12 @@ function getFiltered(){
 function render(){
   const q=document.getElementById('q').value.toLowerCase();
   const qok=x=>!q||(x.title.toLowerCase().includes(q)||x.brand.toLowerCase().includes(q)||x.tags.some(t=>t.toLowerCase().includes(q)));
+  const today=todayKST();
   document.getElementById('tabBar').innerHTML=REGION_TABS.map(r=>{
-    const c=D.filter(x=>!x.isEvent&&regionOf(x)===r&&qok(x)).length;
-    return`<button class="tab-btn${region===r?' on':''}" onclick="region='${r}';shown=PAGE;render()">${r}<span class="cnt">${c}</span></button>`;
-  }).join('');
+    const n=D.filter(x=>!x.isEvent&&regionOf(x)===r&&qok(x)&&x.added===today).length;
+    const badge=n>0?`<span class="cnt dot">${n}</span>`:'';
+    return`<button class="tab-btn${region===r?' on':''}" onclick="region='${r}';shown=PAGE;render()">${r}${badge}</button>`;
+  }).join('')+`<button class="info-dot" onclick="toggleCntHelp(event)" aria-label="배지 안내">ⓘ</button>`;
   const list=getFiltered();
   let html='',lg='';
   if(!list.length){html='<div class="empty"><p>조건에 맞는 항목이 없습니다</p></div>';}
